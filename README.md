@@ -1,4 +1,4 @@
-# 🎧 Spotify AI Agent
+🎧 Spotify AI Agent
 
 Control your Spotify using simple natural language commands directly from the terminal. Built with FastAPI, Spotipy, and Python.
 
@@ -23,3 +23,5 @@ Control your Spotify using simple natural language commands directly from the te
 ```bash
 git clone https://github.com/your-username/spotify-ai-agent
 cd spotify-ai-agent
+and run the server file using uvicorn server.server:app --reload
+after its running open the prompt.py file and then run python prompt.py , it will run succesfully.
