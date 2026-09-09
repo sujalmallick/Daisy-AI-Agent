@@ -13,9 +13,10 @@ class AdaptiveSTTEngine:
     def __init__(self):
         self.hw_info = detect_hardware_tier()
         self.model = None
-        self._load_model()
+        self._load_attempted = False
 
     def _load_model(self):
+        self._load_attempted = True
         try:
             from faster_whisper import WhisperModel
             device = self.hw_info["device"]
@@ -28,6 +29,9 @@ class AdaptiveSTTEngine:
             logger.warning(f"Could not load faster-whisper on {self.hw_info['device']}: {e}. Falling back to standard recognizer.")
 
     def transcribe(self, audio_file_or_data) -> str:
+        if self.model is None and not self._load_attempted:
+            self._load_model()
+
         if self.model:
             try:
                 segments, _ = self.model.transcribe(audio_file_or_data, beam_size=2)

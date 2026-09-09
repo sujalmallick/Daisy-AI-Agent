@@ -8,11 +8,18 @@ class AlexaIntentParser:
     Handles multi-intent conjunction splitting ("and", "then").
     """
 
+    wake_word: str = "daisy"
+
+    @classmethod
+    def set_wake_word(cls, name: str):
+        if name and name.strip():
+            cls.wake_word = name.strip()
+
     PATTERNS = [
         ("AMAZON.PauseIntent", re.compile(r"^(pause|stop|halt|hold up|quiet|shut up)$", re.IGNORECASE)),
         ("AMAZON.ResumeIntent", re.compile(r"^(resume|continue|unpause|keep playing|start playing)$", re.IGNORECASE)),
-        ("AMAZON.NextIntent", re.compile(r"^(next|skip|forward|next song|next track|skip song)$", re.IGNORECASE)),
-        ("AMAZON.PreviousIntent", re.compile(r"^(previous|prev|back|last song|last track|go back)$", re.IGNORECASE)),
+        ("AMAZON.NextIntent", re.compile(r"^(next|skip|forward|next song|next track|skip song|skip track|play next|play next song|play next track|change song|change track)$", re.IGNORECASE)),
+        ("AMAZON.PreviousIntent", re.compile(r"^(previous|prev|back|last song|last track|go back|previous song|previous track|play previous|play previous song|play previous track)$", re.IGNORECASE)),
         ("AMAZON.VolumeIntent", re.compile(r"^(volume\s+(up|down|\d+)|turn\s+it\s+(up|down)|set\s+volume\s+to\s+(\d+)|mute)$", re.IGNORECASE)),
         ("AMAZON.ShuffleIntent", re.compile(r"^(shuffle\s+(on|off)|toggle\s+shuffle|shuffle)$", re.IGNORECASE)),
         ("AMAZON.RepeatIntent", re.compile(r"^(repeat\s+(on|off|track)|toggle\s+repeat|loop\s+this)$", re.IGNORECASE)),
@@ -23,9 +30,11 @@ class AlexaIntentParser:
 
     @classmethod
     def clean_utterance(cls, text: str) -> str:
-        """Strips wake word ('Daisy', 'Hey Daisy') and trailing punctuation."""
+        """Strips wake word (custom wake word or 'Daisy') and trailing punctuation."""
         clean = text.strip().strip("?!.,;\"'")
-        clean = re.sub(r"^(?:hey\s+|ok\s+|hi\s+)?daisy\s*[,:\s]*", "", clean, flags=re.IGNORECASE).strip()
+        wakes = list(set([re.escape(cls.wake_word.lower()), "daisy"]))
+        pattern = rf"^(?:hey\s+|ok\s+|hi\s+|hello\s+)?(?:{'|'.join(wakes)})\s*[,:\s]*"
+        clean = re.sub(pattern, "", clean, flags=re.IGNORECASE).strip()
         return clean.strip("?!.,;\"'")
 
     @classmethod
@@ -38,14 +47,31 @@ class AlexaIntentParser:
     @classmethod
     def parse_single(cls, utterance: str) -> Optional[Dict[str, Any]]:
         raw_clean = utterance.strip().strip("?!.,;\"'").lower()
-        # Wake word or greeting intent: "Daisy", "Hey Daisy", "Hi Daisy", etc.
-        if raw_clean in ["daisy", "hey daisy", "hi daisy", "hello daisy", "ok daisy", "wake up daisy", "are you there", "hello", "hi"]:
+        wakes = list(set([cls.wake_word.lower(), "daisy"]))
+        wake_triggers = []
+        for w in wakes:
+            wake_triggers.extend([w, f"hey {w}", f"hi {w}", f"hello {w}", f"ok {w}", f"wake up {w}"])
+        wake_triggers.extend(["are you there", "hello", "hi"])
+
+        if raw_clean in wake_triggers:
             return {
                 "intent": "AMAZON.WakeGreetingIntent",
                 "action": "wake_greeting",
                 "slots": {},
                 "tokens": 0
             }
+
+        # Self-Close / Exit Intent: "sayonara daisy", "go home daisy", "goodbye", "exit", etc.
+        exit_phrases = [
+            "sayonara", "sayonara daisy", "go home", "go home daisy",
+            "goodbye", "goodbye daisy", "bye", "bye daisy", "bye bye",
+            "exit", "exit daisy", "quit", "quit daisy",
+            "close daisy", "close yourself", "close the app", "close app",
+            "shut down", "shutdown", "shutdown daisy", "shut down daisy",
+            "turn off", "turn off daisy", "go to sleep", "sleep daisy"
+        ]
+        if raw_clean in exit_phrases or any(raw_clean == f"{p} {cls.wake_word.lower()}" for p in ["sayonara", "go home", "goodbye", "bye", "exit", "quit", "close"]):
+            return {"intent": "Daisy.ExitIntent", "action": "exit_app", "slots": {}, "tokens": 0}
 
         # Local conversational intents (0 tokens, no API key required)
         if any(raw_clean == q or raw_clean.startswith(q) for q in ["who are you", "what is your name", "introduce yourself"]):
@@ -59,6 +85,20 @@ class AlexaIntentParser:
 
         clean = cls.clean_utterance(utterance)
         clean_lower = clean.lower()
+
+        # App Close Intent: "close Chrome", "quit Notepad", "close Spotify", "exit Calculator"
+        close_match = re.match(r"^(?:close|quit|exit|kill|terminate|stop)\s+(?:app\s+)?(.+)$", clean_lower, re.IGNORECASE)
+        if close_match:
+            target = close_match.group(1).strip()
+            if target in ["daisy", "yourself", "assistant", "app", "this app", "the app", "window"]:
+                return {"intent": "Daisy.ExitIntent", "action": "exit_app", "slots": {}, "tokens": 0}
+            if target not in ["music", "song", "track", "playback", "playing"]:
+                return {
+                    "intent": "Daisy.AppCloseIntent",
+                    "action": "close_app",
+                    "slots": {"app_name": target},
+                    "tokens": 0
+                }
 
         # App Launch Intent: "open Spotify", "launch VS Code", "open Chrome", "start Notepad", "open calculator"
         app_match = re.match(r"^(?:open|launch|start|run)\s+(?:up\s+)?(.+)$", clean_lower, re.IGNORECASE)
@@ -159,12 +199,14 @@ class AlexaIntentParser:
                 "tokens": 0
             }]
 
-        # 2. Check Wake Greetings: "hello daisy", "hey daisy", "hi daisy", "daisy", etc.
-        if norm in [
-            "daisy", "hey daisy", "hi daisy", "hello daisy", "ok daisy", 
-            "wake up daisy", "are you there", "hello", "hi", "hey",
-            "good morning", "good afternoon", "good evening", "good night"
-        ]:
+        # 2. Check Wake Greetings
+        wakes = list(set([cls.wake_word.lower(), "daisy"]))
+        wake_greetings = []
+        for w in wakes:
+            wake_greetings.extend([w, f"hey {w}", f"hi {w}", f"hello {w}", f"ok {w}", f"wake up {w}"])
+        wake_greetings.extend(["are you there", "hello", "hi", "hey", "good morning", "good afternoon", "good evening", "good night"])
+
+        if norm in wake_greetings:
             return [{
                 "intent": "AMAZON.WakeGreetingIntent",
                 "action": "wake_greeting",

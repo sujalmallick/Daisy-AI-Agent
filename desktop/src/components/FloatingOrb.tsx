@@ -1,13 +1,22 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Mic, Settings, MessageSquare, Maximize2 } from 'lucide-react';
 
 export type OrbStateType = 'idle' | 'listening' | 'thinking' | 'executing' | 'speaking' | 'error';
 export type ThemeType = 'glassmorphism' | 'sleek' | 'cyberpunk' | 'aurora';
 
-interface FloatingOrbProps {
+export interface FloatingOrbProps {
   orbState: OrbStateType;
   theme: ThemeType;
-  onSingleClick: () => void;
-  onDoubleClick: () => void;
+  onActivate: () => void;
+  onOpenSettings?: () => void;
+  onToggleTextInput?: () => void;
+  onOpenDashboard?: () => void;
+  isAmbientListening?: boolean;
+  assistantName?: string;
+  isQuickInputOpen?: boolean;
+  isToastVisible?: boolean;
+  onOpenWindowMode?: () => void;
+  disableDrag?: boolean;
 }
 
 const STATE_COLORS: Record<OrbStateType, Record<string, { r: number; g: number; b: number; hex: string }> | { all: { r: number; g: number; b: number; hex: string } }> = {
@@ -37,11 +46,19 @@ const STATE_COLORS: Record<OrbStateType, Record<string, { r: number; g: number; 
 export const FloatingOrb: React.FC<FloatingOrbProps> = ({
   orbState,
   theme,
-  onSingleClick,
-  onDoubleClick,
+  onActivate,
+  onOpenSettings,
+  onToggleTextInput,
+  isAmbientListening = true,
+  assistantName = 'Daisy',
+  isQuickInputOpen = false,
+  isToastVisible = false,
+  onOpenWindowMode,
+  disableDrag = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const clickTimerRef = useRef<number | null>(null);
+  const dragStartPos = useRef<{ x: number; y: number; time: number } | null>(null);
+  const [isHovered, setIsHovered] = useState(false);
 
   const getColor = () => {
     if (orbState === 'idle') {
@@ -51,6 +68,11 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
     const stateObj = STATE_COLORS[orbState] as { all: { r: number; g: number; b: number; hex: string } };
     return stateObj.all;
   };
+
+  const colorRef = useRef(getColor());
+  useEffect(() => {
+    colorRef.current = getColor();
+  }, [orbState, theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -62,8 +84,8 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
     let animFrameId: number;
 
     const render = () => {
-      const col = getColor();
-      animTime += 0.022;
+      const col = colorRef.current;
+      animTime += 0.024;
 
       const w = canvas.width;
       const h = canvas.height;
@@ -71,40 +93,43 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
 
       const cx = w / 2;
       const cy = h / 2;
+      const radius = 62;
 
+      // Outer radial glow gradient
       const grad = ctx.createRadialGradient(
-        cx + Math.sin(animTime) * 12,
-        cy + Math.cos(animTime * 0.9) * 12,
+        cx + Math.sin(animTime) * 10,
+        cy + Math.cos(animTime * 0.9) * 10,
         4,
         cx,
         cy,
-        70
+        radius
       );
 
       grad.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
-      grad.addColorStop(0.3, `rgba(${col.r}, ${col.g}, ${col.b}, 0.9)`);
+      grad.addColorStop(0.32, `rgba(${col.r}, ${col.g}, ${col.b}, 0.9)`);
       grad.addColorStop(0.72, `rgba(${Math.max(col.r - 40, 5)}, ${Math.max(col.g - 40, 5)}, ${Math.max(col.b - 40, 5)}, 0.92)`);
       grad.addColorStop(1, '#040508');
 
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(cx, cy, 70, 0, Math.PI * 2);
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.fill();
 
+      // Fluid orbital light droplets
       for (let i = 0; i < 3; i++) {
         ctx.beginPath();
         const angle = animTime * 0.9 + (i * Math.PI * 2) / 3;
-        const dist = 24 + Math.sin(animTime * 1.6 + i) * 10;
+        const dist = 22 + Math.sin(animTime * 1.6 + i) * 8;
         const bx = cx + Math.cos(angle) * dist;
         const by = cy + Math.sin(angle) * dist;
 
-        const bGrad = ctx.createRadialGradient(bx, by, 2, bx, by, 34);
-        bGrad.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
-        bGrad.addColorStop(0.5, `rgba(${col.r}, ${col.g}, ${col.b}, 0.3)`);
+        const bGrad = ctx.createRadialGradient(bx, by, 2, bx, by, 30);
+        bGrad.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+        bGrad.addColorStop(0.5, `rgba(${col.r}, ${col.g}, ${col.b}, 0.35)`);
         bGrad.addColorStop(1, 'transparent');
 
         ctx.fillStyle = bGrad;
-        ctx.arc(bx, by, 34, 0, Math.PI * 2);
+        ctx.arc(bx, by, 30, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -116,57 +141,96 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
     return () => {
       cancelAnimationFrame(animFrameId);
     };
-  }, [orbState, theme]);
+  }, []);
 
-  // Debounced click handler to separate single-click (voice) from double-click (expand)
-  const handleClick = () => {
-    if (clickTimerRef.current !== null) {
-      window.clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-      onDoubleClick();
-    } else {
-      clickTimerRef.current = window.setTimeout(() => {
-        clickTimerRef.current = null;
-        onSingleClick();
-      }, 250);
+  const handlePointerDown = (e: React.PointerEvent) => {
+    dragStartPos.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!dragStartPos.current) return;
+    const dx = Math.abs(e.clientX - dragStartPos.current.x);
+    const dy = Math.abs(e.clientY - dragStartPos.current.y);
+    const dt = Date.now() - dragStartPos.current.time;
+    dragStartPos.current = null;
+
+    // If movement is very small and fast, it's a click -> activate Daisy
+    if (dx < 6 && dy < 6 && dt < 400) {
+      onActivate();
     }
   };
 
   const currentColor = getColor();
 
   return (
-    <div className="flex flex-col items-center select-none">
+    <div
+      className="relative flex flex-col items-center justify-center select-none w-[170px] min-h-[190px] shrink-0 p-1"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* 1. Top Status Badge (Natural vertical space, never cut in half) */}
+      <div className={`mb-2 pointer-events-none transition-all duration-300 ${isToastVisible ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}>
+        <div className="px-3 py-1 rounded-full bg-black/90 border border-white/15 backdrop-blur-md flex items-center gap-1.5 text-[10px] font-semibold text-white shadow-xl whitespace-nowrap">
+          <span
+            className="w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0"
+            style={{ backgroundColor: currentColor.hex }}
+          />
+          <span className="tracking-wide">
+            {orbState === 'listening'
+              ? 'Listening...'
+              : orbState === 'thinking'
+              ? 'Thinking...'
+              : orbState === 'executing'
+              ? 'Executing...'
+              : orbState === 'speaking'
+              ? 'Speaking...'
+              : orbState === 'error'
+              ? 'Error'
+              : isAmbientListening
+              ? `${assistantName} Ready`
+              : 'Muted'}
+          </span>
+        </div>
+      </div>
+
+      {/* 2. Draggable or Clickable 3D Glass Orb */}
       <div
-        onClick={handleClick}
-        className="orb-float-anim cursor-pointer relative group flex items-center justify-center"
-        title="Single click to Speak | Double click for Now Playing"
+        {...(disableDrag ? {} : { 'data-tauri-drag-region': true })}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        className={`${
+          disableDrag
+            ? 'no-drag cursor-pointer'
+            : 'data-tauri-drag-region pywebview-drag-region cursor-grab active:cursor-grabbing'
+        } orb-float-anim relative flex items-center justify-center`}
+        title={`Click to talk to ${assistantName}${disableDrag ? '' : ' • Drag to move'}`}
       >
-        {/* Ambient Halo Glow */}
+        {/* Halo Glow */}
         <div
-          className="absolute -inset-10 rounded-full blur-3xl opacity-60 transition-all duration-700 pointer-events-none"
+          className="absolute -inset-2 rounded-full blur-md opacity-40 transition-all duration-700 pointer-events-none"
           style={{ background: `radial-gradient(circle, ${currentColor.hex} 0%, transparent 70%)` }}
         />
 
-        {/* Glass Orb Shell */}
+        {/* 3D Glass Orb Shell */}
         <div
-          className="relative w-36 h-36 rounded-full glass-orb-layer overflow-hidden bg-black flex items-center justify-center"
+          className="relative w-32 h-32 rounded-full glass-orb-layer overflow-hidden bg-black flex items-center justify-center transition-transform duration-300 hover:scale-[1.03]"
           style={{
-            boxShadow: `0 20px 50px -10px rgba(0, 0, 0, 0.95), 0 0 45px ${currentColor.hex}66, inset 0 2px 4px rgba(255, 255, 255, 0.8), inset 0 14px 28px rgba(255, 255, 255, 0.25), inset 0 -12px 24px rgba(0, 0, 0, 0.8), inset -4px 0 10px rgba(255, 255, 255, 0.15)`,
+            boxShadow: `0 4px 14px -2px rgba(0, 0, 0, 0.6), 0 0 16px ${currentColor.hex}33, inset 0 2px 4px rgba(255, 255, 255, 0.8), inset 0 12px 24px rgba(255, 255, 255, 0.25), inset 0 -10px 20px rgba(0, 0, 0, 0.8), inset -4px 0 8px rgba(255, 255, 255, 0.15)`,
           }}
         >
-          <canvas ref={canvasRef} width={144} height={144} className="w-full h-full block rounded-full" />
+          <canvas ref={canvasRef} width={128} height={128} className="w-full h-full block rounded-full pointer-events-none" />
 
-          {/* Specular Curved Shine */}
+          {/* Specular Curved Reflection */}
           <div
-            className="absolute top-1.5 left-3.5 w-24 h-12 rounded-full blur-[1px] transform -rotate-30 pointer-events-none"
+            className="absolute top-1.5 left-3 w-20 h-10 rounded-full blur-[0.8px] transform -rotate-30 pointer-events-none"
             style={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.35) 28%, transparent 70%)',
+              background: 'linear-gradient(135deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.32) 28%, transparent 70%)',
             }}
           />
 
-          {/* Secondary Bottom Reflection */}
+          {/* Secondary Rim Reflection */}
           <div
-            className="absolute bottom-2 right-4 w-12 h-6 rounded-full blur-[2px] pointer-events-none"
+            className="absolute bottom-2 right-3 w-10 h-5 rounded-full blur-[1.5px] pointer-events-none"
             style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%)' }}
           />
 
@@ -176,28 +240,92 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
           {/* Audio Waveforms for Speaking/Listening */}
           {(orbState === 'speaking' || orbState === 'listening') && (
             <div className="absolute inset-0 flex items-center justify-center gap-1 pointer-events-none">
-              <span className="w-1 bg-white/90 rounded-full animate-pulse h-3" />
-              <span className="w-1 bg-white/90 rounded-full animate-pulse h-7 delay-75" />
-              <span className="w-1 bg-white/90 rounded-full animate-pulse h-9 delay-150" />
-              <span className="w-1 bg-white/90 rounded-full animate-pulse h-5 delay-100" />
+              <span className="w-1 bg-white/95 rounded-full animate-pulse h-2.5" />
+              <span className="w-1 bg-white/95 rounded-full animate-pulse h-6 delay-75" />
+              <span className="w-1 bg-white/95 rounded-full animate-pulse h-8 delay-150" />
+              <span className="w-1 bg-white/95 rounded-full animate-pulse h-4 delay-100" />
             </div>
           )}
+
+          {/* Executing Spinner Ring */}
+          {orbState === 'thinking' && (
+            <div className="absolute inset-2 rounded-full border-2 border-transparent border-t-purple-400 border-r-purple-300 animate-spin pointer-events-none" />
+          )}
+
+          {orbState === 'executing' && (
+            <div className="absolute inset-2 rounded-full border-2 border-transparent border-t-amber-400 border-b-orange-400 animate-spin pointer-events-none" />
+          )}
+
+          {/* Ambient Wake Indicator Dot */}
+          <div
+            className={`absolute bottom-2.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full pointer-events-none transition-colors ${
+              isAmbientListening ? 'bg-emerald-400 shadow-[0_0_6px_#34d399]' : 'bg-zinc-600'
+            }`}
+            title={isAmbientListening ? 'Hands-free wake active' : 'Wake paused'}
+          />
         </div>
       </div>
 
-      {/* Breathing Ground Drop Shadow */}
-      <div className="w-28 h-4 mt-7 rounded-full bg-black/80 blur-md shadow-breath-anim pointer-events-none" />
-
-      {/* Helper text */}
-      <div className="mt-4 text-xs text-zinc-400 font-normal flex items-center gap-2">
-        <span>Click to talk •</span>
-        <button
-          onClick={onDoubleClick}
-          className="text-emerald-400 hover:text-emerald-300 font-medium underline underline-offset-4 cursor-pointer"
+      {/* 3. Floating Micro Controls (In its dedicated space below orb - NEVER overlaps!) */}
+      {!disableDrag && (
+        <div
+          className={`mt-2.5 flex items-center gap-1.5 bg-black/90 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/15 shadow-xl transition-all duration-200 z-30 no-drag ${
+            isHovered && !isQuickInputOpen ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-1 scale-90 pointer-events-none'
+          }`}
         >
-          Double-click for Now Playing
-        </button>
-      </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onActivate();
+            }}
+            className="w-5 h-5 rounded-full text-zinc-300 hover:text-emerald-400 hover:bg-white/10 flex items-center justify-center transition cursor-pointer"
+            title="Click to talk (Ctrl+Space)"
+          >
+            <Mic className="w-3 h-3" />
+          </button>
+
+          {onToggleTextInput && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleTextInput();
+              }}
+              className="w-5 h-5 rounded-full text-zinc-300 hover:text-sky-400 hover:bg-white/10 flex items-center justify-center transition cursor-pointer"
+              title="Type a command"
+            >
+              <MessageSquare className="w-3 h-3" />
+            </button>
+          )}
+
+          {onOpenSettings && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenSettings();
+              }}
+              className="w-5 h-5 rounded-full text-zinc-300 hover:text-white hover:bg-white/10 flex items-center justify-center transition cursor-pointer"
+              title="Settings & Controls"
+            >
+              <Settings className="w-3 h-3" />
+            </button>
+          )}
+
+          {onOpenWindowMode && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenWindowMode();
+              }}
+              className="w-5 h-5 rounded-full text-zinc-300 hover:text-emerald-400 hover:bg-white/10 flex items-center justify-center transition cursor-pointer"
+              title="Expand to Full Window Mode"
+            >
+              <Maximize2 className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };
+
+export default FloatingOrb;

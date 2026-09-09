@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daisy AI Assistant — Complete UI System Specification for Figma</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            daisy: {
+              emerald: '#1db954',
+              sky: '#38bdf8',
+              purple: '#a855f7',
+              orange: '#fb923c',
+              teal: '#2dd4bf',
+              rose: '#f43f5e',
+              dark: '#07090e',
+              panel: '#0c0f14',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #050608;
+      color: #f3f4f6;
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    }
+
+    /* Glass Orb 3D Styling */
+    .glass-orb {
+      position: relative;
+      border-radius: 9999px;
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.95) 0%, rgba(29, 185, 84, 0.85) 30%, rgba(10, 80, 35, 0.9) 70%, #031006 100%);
+      box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.8),
+        0 0 24px rgba(29, 185, 84, 0.35),
+        inset 0 2px 4px rgba(255, 255, 255, 0.85),
+        inset 0 12px 24px rgba(255, 255, 255, 0.3),
+        inset 0 -12px 24px rgba(0, 0, 0, 0.85),
+        inset -4px 0 8px rgba(255, 255, 255, 0.2);
+    }
+    .orb-listening {
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.95) 0%, rgba(56, 189, 248, 0.85) 30%, rgba(14, 116, 144, 0.9) 70%, #03141f 100%);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 28px rgba(56, 189, 248, 0.5), inset 0 2px 4px rgba(255,255,255,0.85), inset 0 12px 24px rgba(255,255,255,0.3);
+    }
+    .orb-thinking {
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.95) 0%, rgba(168, 85, 247, 0.85) 30%, rgba(107, 33, 168, 0.9) 70%, #150424 100%);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 28px rgba(168, 85, 247, 0.5), inset 0 2px 4px rgba(255,255,255,0.85), inset 0 12px 24px rgba(255,255,255,0.3);
+    }
+    .orb-executing {
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.95) 0%, rgba(251, 146, 60, 0.85) 30%, rgba(194, 65, 12, 0.9) 70%, #200802 100%);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 28px rgba(251, 146, 60, 0.5), inset 0 2px 4px rgba(255,255,255,0.85), inset 0 12px 24px rgba(255,255,255,0.3);
+    }
+    .orb-speaking {
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.95) 0%, rgba(45, 212, 191, 0.85) 30%, rgba(15, 118, 110, 0.9) 70%, #031715 100%);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 28px rgba(45, 212, 191, 0.5), inset 0 2px 4px rgba(255,255,255,0.85), inset 0 12px 24px rgba(255,255,255,0.3);
+    }
+    .orb-error {
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.95) 0%, rgba(244, 63, 94, 0.85) 30%, rgba(159, 18, 57, 0.9) 70%, #22030a 100%);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 28px rgba(244, 63, 94, 0.5), inset 0 2px 4px rgba(255,255,255,0.85), inset 0 12px 24px rgba(255,255,255,0.3);
+    }
+    .orb-sleek {
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.98) 0%, rgba(228, 228, 231, 0.85) 30%, rgba(63, 63, 70, 0.9) 70%, #09090b 100%);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 20px rgba(255, 255, 255, 0.2), inset 0 2px 4px rgba(255,255,255,0.9), inset 0 12px 24px rgba(255,255,255,0.3);
+    }
+    .orb-cyberpunk {
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.98) 0%, rgba(6, 182, 212, 0.85) 35%, rgba(236, 72, 153, 0.9) 75%, #18021c 100%);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 32px rgba(236, 72, 153, 0.6), inset 0 2px 4px rgba(255,255,255,0.9), inset 0 12px 24px rgba(255,255,255,0.3);
+    }
+    .orb-aurora {
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.98) 0%, rgba(129, 140, 248, 0.85) 35%, rgba(167, 139, 250, 0.85) 65%, #05041a 100%);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 30px rgba(129, 140, 248, 0.5), inset 0 2px 4px rgba(255,255,255,0.9), inset 0 12px 24px rgba(255,255,255,0.3);
+    }
+
+    /* Curved specular reflection */
+    .orb-glare {
+      position: absolute;
+      top: 8px;
+      left: 14px;
+      width: 76px;
+      height: 38px;
+      border-radius: 9999px;
+      transform: rotate(-30deg);
+      background: linear-gradient(135deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.32) 32%, transparent 70%);
+      filter: blur(0.6px);
+      pointer-events: none;
+    }
+
+    /* Artboard / Frame Styling for Figma import */
+    .figma-frame {
+      background: #090b10;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 20px 45px -15px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.04);
+      border-radius: 20px;
+      overflow: hidden;
+      position: relative;
+    }
+    .figma-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #9ca3af;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+  </style>
+</head>
+<body class="p-8 lg:p-12 selection:bg-emerald-500 selection:text-black">
+
+  <!-- ==================== HEADER BAR ==================== -->
+  <header class="max-w-[1500px] mx-auto mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6 pb-8 border-b border-white/10">
+    <div>
+      <div class="flex items-center gap-3 mb-2">
+        <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_12px_#1db954]"></span>
+        <h1 class="text-2xl lg:text-3xl font-extrabold tracking-tight text-white flex items-center gap-2">
+          Daisy AI Assistant <span class="text-xs font-mono font-medium px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">v2.4 Full System Spec</span>
+        </h1>
+      </div>
+      <p class="text-sm text-zinc-400 max-w-2xl leading-relaxed">
+        Complete standalone visual mockup of all Daisy UI screens, states, widgets, overlays, and themes. Use this file directly in <span class="text-emerald-400 font-semibold">Figma</span> via the <code class="text-zinc-200 bg-white/10 px-1 py-0.5 rounded text-xs font-mono">html.to.design</code> plugin, Figma AI, or code importer to inspect and design the next-generation interface.
+      </p>
+    </div>
+
+    <!-- Quick Navigation / Export Pills -->
+    <div class="flex flex-wrap items-center gap-2 text-xs font-medium">
+      <a href="#frame-full-window" class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white transition">1. Window Mode</a>
+      <a href="#frame-active-listen" class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white transition">2. Active Listening</a>
+      <a href="#frame-floating" class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white transition">3. Floating Overlay</a>
+      <a href="#frame-sidecars" class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white transition">4. Music Players</a>
+      <a href="#frame-settings" class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white transition">5. Control Center</a>
+      <a href="#frame-orb-matrix" class="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-400 transition font-semibold">6. Orb Matrix</a>
+    </div>
+  </header>
+
+
+  <main class="max-w-[1500px] mx-auto space-y-20">
+
+    <!-- ========================================================================================= -->
+    <!-- FRAME 1: FULL WINDOW SCREEN MODE (DEFAULT / IDLE STATE)                                   -->
+    <!-- ========================================================================================= -->
+    <section id="frame-full-window" class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="figma-tag text-emerald-400">FRAME 01 — FULL WINDOW SCREEN MODE</span>
+          <h2 class="text-xl font-bold text-white mt-1">Default Desktop Window (Idle State • 1000 × 700 px)</h2>
+        </div>
+        <span class="text-xs text-zinc-500 font-mono">Component: App.tsx (appMode === 'window')</span>
+      </div>
+
+      <!-- Mockup Canvas -->
+      <div class="figma-frame w-full max-w-[1000px] h-[680px] flex flex-col mx-auto bg-[#07090e] border border-white/15 rounded-3xl shadow-2xl overflow-hidden">
+        
+        <!-- Windows Custom Titlebar -->
+        <div class="h-11 px-4 flex items-center justify-between border-b border-white/10 bg-white/[0.02] select-none">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#1db954]"></span>
+            <span class="text-xs font-bold tracking-wider text-white">DAISY</span>
+            <span class="text-[10px] text-zinc-400 font-mono ml-1">AI Agent</span>
+            <div class="flex items-center gap-1.5 ml-3 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-[10px] text-emerald-400">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>"Hey Daisy" Wake Active</span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1">
+            <!-- Mode Switcher -->
+            <button class="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs font-medium flex items-center gap-1.5 transition">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              <span>Floating Mode</span>
+            </button>
+            <button class="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 text-xs font-medium flex items-center gap-1.5 transition">
+              <svg class="w-3.5 h-3.5 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              <span>Dashboard</span>
+            </button>
+            <button class="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition ml-1">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <div class="h-4 w-px bg-white/10 mx-1"></div>
+            <!-- Window Control Icons -->
+            <button class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/10 rounded transition">─</button>
+            <button class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/10 rounded transition">□</button>
+            <button class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-rose-400 hover:bg-rose-500/20 rounded transition">✕</button>
+          </div>
+        </div>
+
+        <!-- Main Window Body -->
+        <div class="flex-1 p-8 flex items-center justify-center relative">
+          
+          <!-- Background Ambient Glow -->
+          <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div class="w-[500px] h-[350px] rounded-full bg-emerald-500/10 blur-[120px]"></div>
+          </div>
+
+          <div class="w-full max-w-4xl flex items-center justify-between gap-8 z-10">
+            
+            <!-- Central Interactive Area -->
+            <div class="flex-1 flex flex-col items-center text-center">
+              
+              <!-- 3D Glass Orb (Idle Green) -->
+              <div class="relative w-36 h-36 mb-6 flex items-center justify-center group cursor-pointer">
+                <!-- Outer Halo -->
+                <div class="absolute -inset-2 rounded-full blur-xl opacity-40 bg-emerald-500 pointer-events-none"></div>
+                <!-- Glass Orb Shell -->
+                <div class="glass-orb w-32 h-32 relative flex items-center justify-center transition-transform group-hover:scale-105">
+                  <div class="orb-glare"></div>
+                  <!-- Wake Dot -->
+                  <div class="absolute bottom-3 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></div>
+                </div>
+              </div>
+
+              <!-- Live Status Banner -->
+              <div class="mb-6">
+                <div class="text-sm font-semibold text-zinc-200">
+                  Say <span class="text-emerald-400 font-bold">"Hey Daisy"</span> or click to speak
+                </div>
+                <div class="text-xs text-zinc-400 mt-1">
+                  Full desktop AI assistant with Spotify control & custom MCP tools
+                </div>
+              </div>
+
+              <!-- Command Input Bar -->
+              <div class="w-full max-w-xl bg-black/60 border border-white/15 rounded-2xl p-1.5 flex items-center gap-2 shadow-2xl focus-within:border-emerald-500/50">
+                <button class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-emerald-400 transition cursor-pointer">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                </button>
+                <input 
+                  type="text" 
+                  placeholder="Ask Daisy or command Spotify (e.g. 'play synthwave', 'pause', 'open Chrome')..."
+                  class="flex-1 bg-transparent text-xs text-white placeholder-zinc-500 focus:outline-none px-2 font-medium"
+                />
+                <button class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition flex items-center gap-1.5 shadow-md">
+                  <span>Send</span>
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+              </div>
+
+              <!-- Quick Command Suggestion Chips -->
+              <div class="flex flex-wrap items-center justify-center gap-2 mt-4">
+                <button class="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] text-zinc-300 hover:text-white transition">🎵 Play Synthwave</button>
+                <button class="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] text-zinc-300 hover:text-white transition">⏸ Pause Music</button>
+                <button class="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] text-zinc-300 hover:text-white transition">⏭ Next Track</button>
+                <button class="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] text-zinc-300 hover:text-white transition">🌤 Weather Brief</button>
+              </div>
+            </div>
+
+            <!-- Right Column: Daisy Quick Guide -->
+            <div class="w-[280px] shrink-0 border-l border-white/10 pl-6 hidden lg:block">
+              <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
+                <div class="flex items-center gap-2 text-xs font-semibold text-white">
+                  <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+                  <span>Daisy Quick Guide</span>
+                </div>
+                <div class="text-[11px] text-zinc-400 space-y-2.5 leading-relaxed">
+                  <p>• Say <span class="text-zinc-200 font-medium">"Hey Daisy"</span> anytime to trigger voice control hands-free.</p>
+                  <p>• Click <span class="text-emerald-300 font-medium">Floating Mode</span> above to tuck Daisy into a transparent desktop widget overlay.</p>
+                  <p>• In Floating Mode, hover the orb and click maximize to return to window mode.</p>
+                  <p>• Connect Spotify in Settings to command playback seamlessly.</p>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Window Bottom Status Bar -->
+        <div class="h-8 px-4 border-t border-white/5 bg-black/40 flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+          <div class="flex items-center gap-3">
+            <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Backend: Online</span>
+            <span>Latency: 18ms</span>
+            <span>Engine: Edge-TTS / CTranslate2</span>
+          </div>
+          <div>Shortcut: Ctrl+Space to activate voice</div>
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <!-- ========================================================================================= -->
+    <!-- FRAME 2: FULL WINDOW SCREEN MODE (ACTIVE LISTENING & SPOTIFY PLAYING)                     -->
+    <!-- ========================================================================================= -->
+    <section id="frame-active-listen" class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="figma-tag text-sky-400">FRAME 02 — ACTIVE VOICE & SPOTIFY PLAYING</span>
+          <h2 class="text-xl font-bold text-white mt-1">Window Mode (Active Listening + Integrated Spotify Card)</h2>
+        </div>
+        <span class="text-xs text-zinc-500 font-mono">State: orbState === 'listening' & hasActiveTrack === true</span>
+      </div>
+
+      <!-- Mockup Canvas -->
+      <div class="figma-frame w-full max-w-[1000px] h-[680px] flex flex-col mx-auto bg-[#07090e] border border-white/15 rounded-3xl shadow-2xl overflow-hidden">
+        
+        <!-- Windows Custom Titlebar -->
+        <div class="h-11 px-4 flex items-center justify-between border-b border-white/10 bg-white/[0.02]">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-sky-400 animate-ping"></span>
+            <span class="text-xs font-bold tracking-wider text-white">DAISY</span>
+            <div class="flex items-center gap-1.5 ml-3 px-2 py-0.5 rounded-full bg-sky-950/60 border border-sky-500/30 text-[10px] text-sky-300">
+              <span class="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
+              <span>Listening for speech...</span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1">
+            <button class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-medium flex items-center gap-1.5">
+              <span>Floating Mode</span>
+            </button>
+            <div class="h-4 w-px bg-white/10 mx-1"></div>
+            <button class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-white">─</button>
+            <button class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-white">□</button>
+            <button class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-white">✕</button>
+          </div>
+        </div>
+
+        <!-- Window Body -->
+        <div class="flex-1 p-8 flex items-center justify-center relative">
+          <!-- Sky Blue Ambient Glow -->
+          <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div class="w-[500px] h-[350px] rounded-full bg-sky-500/15 blur-[120px]"></div>
+          </div>
+
+          <div class="w-full max-w-4xl flex items-center justify-between gap-8 z-10">
+            
+            <!-- Left: Orb in Listening State -->
+            <div class="flex-1 flex flex-col items-center text-center">
+              
+              <!-- 3D Glass Orb (Listening Sky Blue with Audio Waves) -->
+              <div class="relative w-36 h-36 mb-6 flex items-center justify-center">
+                <div class="absolute -inset-2 rounded-full blur-xl opacity-50 bg-sky-500 pointer-events-none"></div>
+                <div class="glass-orb orb-listening w-32 h-32 relative flex items-center justify-center">
+                  <div class="orb-glare"></div>
+                  <!-- Audio Waveform Bars Inside Orb -->
+                  <div class="absolute inset-0 flex items-center justify-center gap-1.5 pointer-events-none">
+                    <span class="w-1 bg-white/95 rounded-full h-3"></span>
+                    <span class="w-1 bg-white/95 rounded-full h-8"></span>
+                    <span class="w-1 bg-white/95 rounded-full h-12"></span>
+                    <span class="w-1 bg-white/95 rounded-full h-5"></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Banner -->
+              <div class="mb-6">
+                <div class="text-sm font-semibold text-sky-400 flex items-center justify-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-sky-400 animate-ping"></span>
+                  ● Listening... Speak your request
+                </div>
+                <div class="text-xs text-zinc-400 mt-1">Say "pause", "skip track", or "what's the weather?"</div>
+              </div>
+
+              <!-- Mic active input bar -->
+              <div class="w-full max-w-xl bg-black/60 border border-sky-500/40 rounded-2xl p-1.5 flex items-center gap-2 shadow-2xl">
+                <button class="p-2.5 rounded-xl bg-sky-500/30 text-sky-300 animate-pulse transition">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                </button>
+                <div class="flex-1 text-xs text-sky-200 font-mono italic px-2">"Daisy, play Blinding Lights on Spotify..."</div>
+                <button class="px-4 py-2 rounded-xl bg-sky-500 text-black font-semibold text-xs">Listening</button>
+              </div>
+
+              <!-- Quick chips -->
+              <div class="flex flex-wrap items-center justify-center gap-2 mt-4">
+                <button class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-zinc-300">🎵 Play Synthwave</button>
+                <button class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-zinc-300">⏸ Pause Music</button>
+                <button class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-zinc-300">⏭ Next Track</button>
+              </div>
+            </div>
+
+            <!-- Right: Spotify Now Playing Card -->
+            <div class="w-[320px] shrink-0 border-l border-white/10 pl-6">
+              
+              <!-- NowPlayingCard component -->
+              <div class="w-[290px] p-5 flex flex-col justify-between bg-[#0c0f14]/95 border border-white/15 rounded-3xl shadow-2xl backdrop-blur-2xl">
+                
+                <!-- Card Header -->
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] font-bold tracking-wider text-zinc-400 uppercase">NOW PLAYING</span>
+                    <svg class="w-3 h-3 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                  </div>
+                  <div class="flex items-center gap-1.5 bg-[#1e2329]/90 px-2 py-0.5 rounded-full border border-white/5 text-[9px] text-zinc-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Desktop Audio</span>
+                  </div>
+                </div>
+
+                <!-- Album Art + Peeking Vinyl Record -->
+                <div class="relative w-full aspect-square my-2 flex items-center justify-center">
+                  <!-- Peeking Vinyl -->
+                  <div class="absolute right-1 w-[85%] h-[85%] rounded-full bg-[#141416] border-4 border-[#09090b] shadow-2xl flex items-center justify-center transform translate-x-4 rotate-12">
+                    <div class="w-full h-full rounded-full border border-zinc-700/30 flex items-center justify-center">
+                      <div class="w-2/3 h-2/3 rounded-full border border-zinc-700/20 flex items-center justify-center">
+                        <div class="w-12 h-12 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-700 flex items-center justify-center">
+                          <div class="w-3 h-3 rounded-full bg-black"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Front Album Cover -->
+                  <div class="relative z-10 w-[86%] h-[86%] rounded-2xl overflow-hidden shadow-2xl border border-white/10 mr-auto bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex flex-col justify-end p-3">
+                    <div class="absolute inset-0 bg-cover bg-center opacity-80" style="background-image: url('https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=500&q=80');"></div>
+                    <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-full text-[9px] font-semibold border border-emerald-500/20 flex items-center gap-1 text-emerald-400">
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>LIVE</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Title & Artist -->
+                <div class="text-center my-2">
+                  <h3 class="text-sm font-bold text-white tracking-tight truncate">Blinding Lights</h3>
+                  <p class="text-[11px] text-zinc-400 truncate mt-0.5">The Weeknd • After Hours</p>
+                </div>
+
+                <!-- Scrubber -->
+                <div class="my-1.5">
+                  <div class="w-full bg-[#2a2e35] h-1 rounded-full overflow-hidden">
+                    <div class="bg-emerald-400 h-full rounded-full w-[42%] shadow-[0_0_8px_#34d399]"></div>
+                  </div>
+                  <div class="flex justify-between text-[10px] text-zinc-400 mt-1 font-mono">
+                    <span>1:28</span>
+                    <span>3:20</span>
+                  </div>
+                </div>
+
+                <!-- Transport Controls -->
+                <div class="flex items-center justify-between px-1 my-1">
+                  <button class="text-emerald-400"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 3 5 5-5 5"/><path d="M4 20L21 3"/><path d="m21 16-5 5-5-5"/><path d="M15 15l-5 5-6-6"/></svg></button>
+                  <button class="text-zinc-300 hover:text-white"><svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2"/></svg></button>
+                  <button class="w-10 h-10 rounded-full bg-emerald-400 text-black flex items-center justify-center shadow-lg font-bold">
+                    <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                  </button>
+                  <button class="text-zinc-300 hover:text-white"><svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2"/></svg></button>
+                  <button class="text-zinc-500 hover:text-zinc-300"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></button>
+                </div>
+
+                <!-- Volume Slider -->
+                <div class="flex items-center gap-2 pt-2 mt-1 border-t border-white/5">
+                  <svg class="w-3.5 h-3.5 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                  <div class="w-full bg-[#2a2e35] h-1 rounded-full overflow-hidden">
+                    <div class="bg-emerald-400 h-full w-[65%]"></div>
+                  </div>
+                  <span class="text-[10px] font-mono text-zinc-400">65%</span>
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <!-- ========================================================================================= -->
+    <!-- FRAME 3 & 4: FLOATING OVERLAY & MUSIC SIDECARS (DESKTOP WIDGET)                           -->
+    <!-- ========================================================================================= -->
+    <section id="frame-floating" class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="figma-tag text-teal-400">FRAME 03 & 04 — FLOATING DESKTOP OVERLAY</span>
+          <h2 class="text-xl font-bold text-white mt-1">True Floating Widget (No Window Chrome • Transparent Desktop)</h2>
+        </div>
+        <span class="text-xs text-zinc-500 font-mono">Component: FloatingOrb.tsx + CompactPlayer.tsx / NowPlayingCard.tsx</span>
+      </div>
+
+      <!-- Desktop Wallpaper Simulator Context -->
+      <div class="figma-frame w-full p-10 bg-gradient-to-br from-slate-900 via-[#0b101b] to-black rounded-3xl border border-white/10 relative overflow-hidden">
+        
+        <!-- Wallpaper Grid Guidelines -->
+        <div class="absolute inset-0 bg-[linear-gradient(to_right,#ffffff05_1px,transparent_1px),linear-gradient(to_bottom,#ffffff05_1px,transparent_1px)] bg-[size:32px_32px]"></div>
+
+        <div class="relative z-10 space-y-12">
+          
+          <!-- Row A: Compact Floating Orb with Hover Controls -->
+          <div class="flex flex-col md:flex-row items-center gap-12">
+            
+            <!-- State 1: Floating Orb Idle -->
+            <div class="flex flex-col items-center">
+              <span class="text-xs font-mono text-zinc-400 mb-3">State A: Pure Floating Orb (Idle)</span>
+              
+              <!-- Floating Cluster Container -->
+              <div class="relative w-[160px] h-[160px] flex flex-col items-center justify-center">
+                <!-- Top Status Pill -->
+                <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-black/80 border border-white/10 backdrop-blur-md flex items-center gap-1.5 text-[10px] font-medium text-white shadow-lg whitespace-nowrap">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Daisy Ready</span>
+                </div>
+
+                <!-- 3D Glass Orb -->
+                <div class="relative w-32 h-32 flex items-center justify-center group cursor-grab">
+                  <div class="absolute -inset-1 rounded-full blur-md opacity-40 bg-emerald-500 pointer-events-none"></div>
+                  <div class="glass-orb w-32 h-32 relative flex items-center justify-center">
+                    <div class="orb-glare"></div>
+                    <div class="absolute bottom-2.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></div>
+                  </div>
+                </div>
+
+                <!-- Floating Micro Controls Bar (on hover) -->
+                <div class="absolute -bottom-3.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/85 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/10 shadow-lg">
+                  <button class="w-5 h-5 rounded-full text-zinc-300 hover:text-emerald-400 flex items-center justify-center">
+                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                  </button>
+                  <button class="w-5 h-5 rounded-full text-zinc-300 hover:text-sky-400 flex items-center justify-center">
+                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                  </button>
+                  <button class="w-5 h-5 rounded-full text-zinc-300 hover:text-white flex items-center justify-center">
+                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                  </button>
+                  <button class="w-5 h-5 rounded-full text-zinc-300 hover:text-emerald-400 flex items-center justify-center">
+                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- State 2: Floating Orb + Compact Spotify Sidecar -->
+            <div id="frame-sidecars" class="flex flex-col items-center">
+              <span class="text-xs font-mono text-zinc-400 mb-3">State B: Orb + Compact Spotify Sidecar (275 × 68 px)</span>
+              
+              <div class="flex items-center gap-3 bg-transparent p-2">
+                
+                <!-- Orb -->
+                <div class="relative w-32 h-32 flex items-center justify-center shrink-0">
+                  <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-black/80 border border-white/10 backdrop-blur-md flex items-center gap-1.5 text-[10px] font-medium text-white shadow-lg whitespace-nowrap">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Daisy Ready</span>
+                  </div>
+                  <div class="glass-orb w-32 h-32 relative flex items-center justify-center">
+                    <div class="orb-glare"></div>
+                  </div>
+                </div>
+
+                <!-- Compact Sidecar Player Card -->
+                <div class="relative flex items-center gap-3 px-3.5 py-2.5 rounded-2xl bg-[#0c0f14]/90 border border-white/10 shadow-2xl backdrop-blur-2xl w-[275px] h-[68px] cursor-pointer hover:border-white/20 transition">
+                  
+                  <!-- Artwork Thumbnail -->
+                  <div class="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/10 bg-zinc-900 shadow-md flex items-center justify-center">
+                    <img src="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=150&q=80" alt="Album" class="w-full h-full object-cover"/>
+                    <!-- Audio waves -->
+                    <div class="absolute inset-0 bg-black/40 flex items-center justify-center gap-0.5">
+                      <span class="w-0.5 bg-emerald-400 rounded-full h-2.5"></span>
+                      <span class="w-0.5 bg-emerald-400 rounded-full h-4"></span>
+                      <span class="w-0.5 bg-emerald-400 rounded-full h-2"></span>
+                    </div>
+                  </div>
+
+                  <!-- Track Info -->
+                  <div class="flex-1 min-w-0 pr-1">
+                    <span class="text-xs font-semibold text-white truncate block">Midnight City</span>
+                    <p class="text-[11px] text-zinc-400 truncate mt-0.5">M83 • Hurry Up, We're Dreaming</p>
+                  </div>
+
+                  <!-- Controls -->
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button class="w-8 h-8 rounded-full bg-white/10 hover:bg-emerald-500 hover:text-black text-white flex items-center justify-center transition">
+                      <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    </button>
+                    <button class="w-7 h-7 rounded-full text-zinc-400 hover:text-white flex items-center justify-center transition">
+                      <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2"/></svg>
+                    </button>
+                  </div>
+
+                </div>
+
+              </div>
+            </div>
+
+            <!-- State 3: Tucked Pull-out Tab -->
+            <div class="flex flex-col items-center">
+              <span class="text-xs font-mono text-zinc-400 mb-3">State C: Swiped / Tucked Pull Tab</span>
+              
+              <div class="flex items-center">
+                <!-- Orb -->
+                <div class="relative w-32 h-32 flex items-center justify-center shrink-0">
+                  <div class="glass-orb w-32 h-32 relative flex items-center justify-center">
+                    <div class="orb-glare"></div>
+                  </div>
+                </div>
+
+                <!-- Docked Tab Pill -->
+                <div class="-ml-2 flex items-center gap-1 py-2 px-2.5 rounded-r-xl bg-[#0c0f14]/90 border border-l-0 border-white/15 shadow-xl text-emerald-400 cursor-pointer hover:bg-zinc-800 transition">
+                  <svg class="w-3.5 h-3.5 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Row B: Orb + Expanded Floating Card -->
+          <div class="pt-6 border-t border-white/10 flex flex-col items-center">
+            <span class="text-xs font-mono text-zinc-400 mb-4">State D: Floating Orb + Full Expanded Player Card (310 × 420 px)</span>
+            <div class="flex items-start gap-5">
+              
+              <!-- Orb Anchor -->
+              <div class="relative w-32 h-32 flex items-center justify-center shrink-0 mt-4">
+                <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-black/80 border border-white/10 backdrop-blur-md flex items-center gap-1.5 text-[10px] font-medium text-white shadow-lg whitespace-nowrap">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Daisy Ready</span>
+                </div>
+                <div class="glass-orb w-32 h-32 relative flex items-center justify-center">
+                  <div class="orb-glare"></div>
+                </div>
+              </div>
+
+              <!-- Expanded NowPlayingCard -->
+              <div class="w-[310px] p-5 flex flex-col justify-between bg-[#0c0f14]/95 border border-white/15 rounded-3xl shadow-2xl backdrop-blur-2xl">
+                <!-- Header -->
+                <div class="flex items-center justify-between mb-3">
+                  <span class="text-[10px] font-bold tracking-wider text-zinc-400 uppercase">NOW PLAYING</span>
+                  <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-1.5 bg-[#1e2329]/90 px-2 py-0.5 rounded-full border border-white/5 text-[9px] text-zinc-300">
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>Spotify Connect</span>
+                    </div>
+                    <button class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/15 text-zinc-400 flex items-center justify-center" title="Fold back to compact">
+                      <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14h6v6m10-10h-6V4m0 6 7-7M3 21l7-7"/></svg>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Vinyl & Art -->
+                <div class="relative w-full aspect-square my-2 flex items-center justify-center">
+                  <div class="absolute right-1 w-[85%] h-[85%] rounded-full bg-[#141416] border-4 border-[#09090b] shadow-2xl flex items-center justify-center transform translate-x-4 rotate-12">
+                    <div class="w-full h-full rounded-full border border-zinc-700/30 flex items-center justify-center">
+                      <div class="w-12 h-12 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-700 flex items-center justify-center">
+                        <div class="w-3 h-3 rounded-full bg-black"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="relative z-10 w-[86%] h-[86%] rounded-2xl overflow-hidden shadow-2xl border border-white/10 mr-auto bg-gradient-to-br from-indigo-900 to-purple-950 flex flex-col justify-end p-3">
+                    <img src="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80" alt="Album" class="absolute inset-0 w-full h-full object-cover"/>
+                    <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-full text-[9px] font-semibold border border-emerald-500/20 flex items-center gap-1 text-emerald-400">
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>LIVE</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Info -->
+                <div class="text-center my-2">
+                  <h3 class="text-sm font-bold text-white tracking-tight truncate">Midnight City</h3>
+                  <p class="text-[11px] text-zinc-400 truncate mt-0.5">M83 • Hurry Up, We're Dreaming</p>
+                </div>
+
+                <!-- Scrubber -->
+                <div class="my-1.5">
+                  <div class="w-full bg-[#2a2e35] h-1 rounded-full overflow-hidden">
+                    <div class="bg-emerald-400 h-full rounded-full w-[38%] shadow-[0_0_8px_#34d399]"></div>
+                  </div>
+                  <div class="flex justify-between text-[10px] text-zinc-400 mt-1 font-mono">
+                    <span>1:32</span>
+                    <span>4:04</span>
+                  </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="flex items-center justify-between px-1 my-1">
+                  <button class="text-emerald-400"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 3 5 5-5 5"/><path d="M4 20L21 3"/></svg></button>
+                  <button class="text-zinc-300 hover:text-white"><svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><polygon points="19 20 9 12 19 4 19 20"/></svg></button>
+                  <button class="w-10 h-10 rounded-full bg-emerald-400 text-black flex items-center justify-center shadow-lg font-bold">
+                    <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                  </button>
+                  <button class="text-zinc-300 hover:text-white"><svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/></svg></button>
+                  <button class="text-zinc-500"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m17 2 4 4-4 4"/></svg></button>
+                </div>
+
+                <!-- Volume -->
+                <div class="flex items-center gap-2 pt-2 mt-1 border-t border-white/5">
+                  <svg class="w-3.5 h-3.5 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                  <div class="w-full bg-[#2a2e35] h-1 rounded-full overflow-hidden">
+                    <div class="bg-emerald-400 h-full w-[70%]"></div>
+                  </div>
+                  <span class="text-[10px] font-mono text-zinc-400">70%</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <!-- ========================================================================================= -->
+    <!-- FRAME 5: DAISY CONTROL CENTER & SETTINGS MODAL (EXACT FIGMA SPEC FROM USER DESIGN)        -->
+    <!-- ========================================================================================= -->
+    <section id="frame-settings" class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="figma-tag text-purple-400">FRAME 05 — SETTINGS & CONTROL CENTER</span>
+          <h2 class="text-xl font-bold text-white mt-1">Daisy Settings Dialog (Exact User Mockup • 580 × 440 px)</h2>
+        </div>
+        <span class="text-xs text-zinc-500 font-mono">Component: SettingsModal.tsx</span>
+      </div>
+
+      <div class="figma-frame p-8 bg-[#06080c] flex flex-col items-center justify-center rounded-3xl">
+        
+        <!-- Settings Modal Card Matching Screenshot 1:1 -->
+        <div 
+          class="w-[580px] max-w-full h-[430px] bg-[#0c0e15]/98 border border-white/[0.08] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+          style="box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.05);"
+        >
+          
+          <!-- Header Bar -->
+          <div class="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] bg-white/[0.01]">
+            <div class="flex items-center gap-3">
+              <!-- 3D Glowing Purple Mini Orb Icon -->
+              <div class="relative w-6 h-6 rounded-full flex items-center justify-center">
+                <div class="absolute -inset-1 rounded-full bg-purple-500/40 blur-sm pointer-events-none"></div>
+                <div 
+                  class="relative w-6 h-6 rounded-full border border-purple-300/40 shadow-inner"
+                  style="background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.9) 0%, rgba(139, 92, 246, 0.9) 35%, rgba(76, 29, 149, 0.95) 75%, #0e0720 100%); box-shadow: 0 0 10px rgba(139, 92, 246, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.8), inset 0 -3px 6px rgba(0, 0, 0, 0.7);"
+                >
+                  <div class="absolute top-0.5 left-1 w-3.5 h-1.5 rounded-full bg-white/70 blur-[0.3px] -rotate-30"></div>
+                </div>
+              </div>
+              <h2 class="text-base font-semibold text-white tracking-tight">Settings</h2>
+            </div>
+
+            <!-- Circular Dark Close Button -->
+            <button 
+              class="w-7 h-7 rounded-full bg-white/[0.06] hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition"
+              title="Close Settings"
+            >
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+
+          <!-- Body: Left Sidebar + Right Settings Panel -->
+          <div class="flex flex-1 min-h-0 overflow-hidden">
+            
+            <!-- Left Navigation Sidebar -->
+            <div class="w-[170px] shrink-0 border-r border-white/[0.06] py-3 flex flex-col justify-between bg-black/20">
+              <nav class="space-y-0.5">
+                <!-- General (Active) -->
+                <button class="relative w-full px-4 py-2.5 flex items-center gap-3 text-xs text-left text-white font-semibold transition">
+                  <span class="absolute left-0 top-1 bottom-1 w-1 bg-[#8b5cf6] rounded-r"></span>
+                  <svg class="w-4 h-4 shrink-0 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                  <span class="tracking-tight">General</span>
+                </button>
+
+                <!-- Voice -->
+                <button class="relative w-full px-4 py-2.5 flex items-center gap-3 text-xs text-left text-zinc-400 hover:text-zinc-200 transition">
+                  <svg class="w-4 h-4 shrink-0 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                  <span class="tracking-tight">Voice</span>
+                </button>
+
+                <!-- AI -->
+                <button class="relative w-full px-4 py-2.5 flex items-center gap-3 text-xs text-left text-zinc-400 hover:text-zinc-200 transition">
+                  <svg class="w-4 h-4 shrink-0 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+                  <span class="tracking-tight">AI</span>
+                </button>
+
+                <!-- Spotify -->
+                <button class="relative w-full px-4 py-2.5 flex items-center gap-3 text-xs text-left text-zinc-400 hover:text-zinc-200 transition">
+                  <svg class="w-4 h-4 shrink-0 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                  <span class="tracking-tight">Spotify</span>
+                </button>
+
+                <!-- MCP -->
+                <button class="relative w-full px-4 py-2.5 flex items-center gap-3 text-xs text-left text-zinc-400 hover:text-zinc-200 transition">
+                  <svg class="w-4 h-4 shrink-0 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/></svg>
+                  <span class="tracking-tight">MCP</span>
+                </button>
+
+                <!-- Appearance -->
+                <button class="relative w-full px-4 py-2.5 flex items-center gap-3 text-xs text-left text-zinc-400 hover:text-zinc-200 transition">
+                  <svg class="w-4 h-4 shrink-0 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+                  <span class="tracking-tight">Appearance</span>
+                </button>
+
+                <!-- Diagnostics -->
+                <button class="relative w-full px-4 py-2.5 flex items-center gap-3 text-xs text-left text-zinc-400 hover:text-zinc-200 transition">
+                  <svg class="w-4 h-4 shrink-0 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                  <span class="tracking-tight">Diagnostics</span>
+                </button>
+              </nav>
+            </div>
+
+            <!-- Right Content Panel: General Settings Rows from Screenshot -->
+            <div class="flex-1 p-6 overflow-y-auto space-y-4">
+              
+              <!-- Row 1: Launch at startup -->
+              <div class="flex items-center justify-between py-3 border-b border-white/[0.04]">
+                <div class="space-y-0.5 pr-4">
+                  <div class="text-sm font-semibold text-white tracking-tight">Launch at startup</div>
+                  <div class="text-xs text-zinc-400 font-normal">Start Daisy when Windows boots</div>
+                </div>
+                <!-- Purple Toggle Switch (Active) -->
+                <div class="relative inline-flex h-6 w-11 shrink-0 rounded-full bg-[#8b5cf6] p-0.5 shadow-sm">
+                  <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md translate-x-5"></span>
+                </div>
+              </div>
+
+              <!-- Row 2: Always on top -->
+              <div class="flex items-center justify-between py-3 border-b border-white/[0.04]">
+                <div class="space-y-0.5 pr-4">
+                  <div class="text-sm font-semibold text-white tracking-tight">Always on top</div>
+                  <div class="text-xs text-zinc-400 font-normal">Float above all other windows</div>
+                </div>
+                <!-- Purple Toggle Switch (Active) -->
+                <div class="relative inline-flex h-6 w-11 shrink-0 rounded-full bg-[#8b5cf6] p-0.5 shadow-sm">
+                  <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md translate-x-5"></span>
+                </div>
+              </div>
+
+              <!-- Row 3: Global hotkey -->
+              <div class="flex items-center justify-between py-3 border-b border-white/[0.04]">
+                <div class="space-y-0.5 pr-4">
+                  <div class="text-sm font-semibold text-white tracking-tight">Global hotkey</div>
+                  <div class="text-xs text-zinc-400 font-normal">Press Ctrl+Shift+D to activate Daisy</div>
+                </div>
+                <!-- Purple Toggle Switch (Active) -->
+                <div class="relative inline-flex h-6 w-11 shrink-0 rounded-full bg-[#8b5cf6] p-0.5 shadow-sm">
+                  <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md translate-x-5"></span>
+                </div>
+              </div>
+
+              <!-- Row 4: Version (Cyan/Teal Monospace Text from Screenshot) -->
+              <div class="flex items-center justify-between py-3 border-b border-white/[0.04]">
+                <div class="space-y-0.5 pr-4">
+                  <div class="text-sm font-semibold text-white tracking-tight">Version</div>
+                  <div class="text-xs text-zinc-400 font-normal">Update available</div>
+                </div>
+                <div class="font-mono text-xs font-semibold text-[#22d3ee] tracking-wide">
+                  v0.9.2 → v1.0.0
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <!-- ========================================================================================= -->
+    <!-- FRAME 6: SYSTEM TELEMETRY & LIVE DIAGNOSTICS DASHBOARD                                    -->
+    <!-- ========================================================================================= -->
+    <section id="frame-dashboard" class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="figma-tag text-amber-400">FRAME 06 — SYSTEM TELEMETRY & DIAGNOSTICS</span>
+          <h2 class="text-xl font-bold text-white mt-1">Live Diagnostics Dashboard (Full Management View • 1000 × 600 px)</h2>
+        </div>
+        <span class="text-xs text-zinc-500 font-mono">Component: DashboardView.tsx (appMode === 'dashboard')</span>
+      </div>
+
+      <div class="figma-frame w-full max-w-[1000px] flex flex-col mx-auto bg-[#0c0e12]/95 border border-white/15 rounded-3xl shadow-2xl overflow-hidden">
+        
+        <!-- Header -->
+        <div class="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
+          <div class="flex items-center gap-3">
+            <button class="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 transition">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+              <span>Orb View</span>
+            </button>
+            <div class="h-4 w-px bg-white/10"></div>
+            <div class="flex items-center gap-2">
+              <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              <h3 class="text-sm font-semibold text-white tracking-tight">Daisy Live Inspector & Diagnostics</h3>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <span class="px-2.5 py-1 text-[11px] rounded-lg bg-emerald-950/40 border border-emerald-500/40 text-emerald-400 flex items-center gap-1.5 font-medium">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Live Polling Active
+            </span>
+            <button class="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Telemetry Cards Grid -->
+        <div class="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 border-b border-white/10 bg-black/20">
+          
+          <!-- Card 1: Hardware -->
+          <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-semibold uppercase text-zinc-400 tracking-wider">Hardware Tier</span>
+              <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#1db954]"></span>
+            </div>
+            <div class="text-sm font-bold text-white">NVIDIA RTX 4070</div>
+            <div class="text-[10px] font-mono text-zinc-400">CTranslate2 • float16 CUDA</div>
+          </div>
+
+          <!-- Card 2: Spotify MCP -->
+          <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-semibold uppercase text-zinc-400 tracking-wider">Spotify Engine</span>
+              <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#1db954]"></span>
+            </div>
+            <div class="text-sm font-bold text-white">Connected</div>
+            <div class="text-[10px] font-mono text-zinc-400">Device: Living Room (Active)</div>
+          </div>
+
+          <!-- Card 3: AI Brain -->
+          <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-semibold uppercase text-zinc-400 tracking-wider">Agent Model</span>
+              <span class="w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_6px_#a855f7]"></span>
+            </div>
+            <div class="text-sm font-bold text-white">Gemini 2.0 Flash</div>
+            <div class="text-[10px] font-mono text-zinc-400">Fastpath & Multi-tool Planner</div>
+          </div>
+
+          <!-- Card 4: Registered Tools -->
+          <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-semibold uppercase text-zinc-400 tracking-wider">Tool Registry</span>
+              <span class="text-xs font-mono text-emerald-400 font-bold">14 Active</span>
+            </div>
+            <div class="text-sm font-bold text-white">4 MCP Servers</div>
+            <div class="text-[10px] font-mono text-zinc-400">Spotify, Launcher, FS, Custom</div>
+          </div>
+
+        </div>
+
+        <!-- Live Terminal Stream -->
+        <div class="p-6 space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2 text-xs font-semibold text-white">
+              <svg class="w-4 h-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
+              <span>Live System Event Stream</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-[11px]">
+              <span class="px-2 py-0.5 rounded bg-white/10 text-white font-medium">ALL</span>
+              <span class="px-2 py-0.5 rounded text-zinc-400 hover:text-white">INFO</span>
+              <span class="px-2 py-0.5 rounded text-zinc-400 hover:text-white">WARN</span>
+              <span class="px-2 py-0.5 rounded text-zinc-400 hover:text-white">ERROR</span>
+            </div>
+          </div>
+
+          <!-- Terminal Box -->
+          <div class="w-full h-44 bg-black/80 rounded-2xl border border-white/10 p-3.5 font-mono text-[11px] text-zinc-300 space-y-1.5 overflow-hidden">
+            <div class="flex items-center gap-2"><span class="text-zinc-600">[01:05:12]</span> <span class="text-emerald-400 font-bold">INFO</span> <span class="text-zinc-500">daisy.server:</span> <span>FastAPI backend initialized on 127.0.0.1:8000</span></div>
+            <div class="flex items-center gap-2"><span class="text-zinc-600">[01:05:13]</span> <span class="text-emerald-400 font-bold">INFO</span> <span class="text-zinc-500">hardware:</span> <span>Detected NVIDIA GPU (CUDA), initialized CTranslate2 float16</span></div>
+            <div class="flex items-center gap-2"><span class="text-zinc-600">[01:05:14]</span> <span class="text-emerald-400 font-bold">INFO</span> <span class="text-zinc-500">voice.stt:</span> <span>Whisper STT engine warm and ready for voice stream</span></div>
+            <div class="flex items-center gap-2"><span class="text-zinc-600">[01:05:15]</span> <span class="text-cyan-400 font-bold">INFO</span> <span class="text-zinc-500">mcp.manager:</span> <span>Registered 14 tools across 4 servers (Spotify, Launcher, FS, Custom)</span></div>
+            <div class="flex items-center gap-2"><span class="text-zinc-600">[01:05:18]</span> <span class="text-purple-400 font-bold">INFO</span> <span class="text-zinc-500">voice.wake:</span> <span>Ambient wake word listener active for trigger: "Hey Daisy"</span></div>
+            <div class="flex items-center gap-2"><span class="text-zinc-600">[01:05:22]</span> <span class="text-emerald-400 font-bold">INFO</span> <span class="text-zinc-500">spotify:</span> <span>Playback status synced: "Midnight City" by M83 (Playing)</span></div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex items-center justify-between pt-2">
+            <button class="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 text-xs font-medium flex items-center gap-1.5 transition">
+              <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              <span>Test Voice (JennyNeural)</span>
+            </button>
+            <button class="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 text-xs transition">Clear Terminal Logs</button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <!-- ========================================================================================= -->
+    <!-- FRAME 7: COMPREHENSIVE ORB STATES & THEME MATRIX                                          -->
+    <!-- ========================================================================================= -->
+    <section id="frame-orb-matrix" class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="figma-tag text-emerald-400">FRAME 07 — CORE ORB VISUAL STATES & THEMES</span>
+          <h2 class="text-xl font-bold text-white mt-1">State Machine Matrix (6 Behavior States × 4 Themes)</h2>
+        </div>
+        <span class="text-xs text-zinc-500 font-mono">Component: FloatingOrb.tsx (Canvas & Gradient Renderer)</span>
+      </div>
+
+      <!-- State Matrix Grid -->
+      <div class="figma-frame p-8 bg-[#07090e] rounded-3xl space-y-8">
+        
+        <!-- 6 Behavior States -->
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-400 mb-6">A. All Assistant Interaction States</h3>
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-6 text-center">
+            
+            <!-- 1. Idle -->
+            <div class="flex flex-col items-center">
+              <div class="w-24 h-24 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb w-20 h-20 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 48px; height: 24px;"></div>
+                  <div class="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-emerald-400"></div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">IDLE</span>
+              <span class="text-[10px] text-emerald-400 font-mono mt-0.5">#1db954</span>
+              <span class="text-[10px] text-zinc-500 mt-1">Ambient listening</span>
+            </div>
+
+            <!-- 2. Listening -->
+            <div class="flex flex-col items-center">
+              <div class="w-24 h-24 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb orb-listening w-20 h-20 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 48px; height: 24px;"></div>
+                  <div class="absolute inset-0 flex items-center justify-center gap-1">
+                    <span class="w-0.5 bg-white rounded-full h-2"></span>
+                    <span class="w-0.5 bg-white rounded-full h-5"></span>
+                    <span class="w-0.5 bg-white rounded-full h-3"></span>
+                  </div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">LISTENING</span>
+              <span class="text-[10px] text-sky-400 font-mono mt-0.5">#38bdf8</span>
+              <span class="text-[10px] text-zinc-500 mt-1">Speech capture</span>
+            </div>
+
+            <!-- 3. Thinking -->
+            <div class="flex flex-col items-center">
+              <div class="w-24 h-24 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb orb-thinking w-20 h-20 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 48px; height: 24px;"></div>
+                  <div class="absolute inset-1.5 rounded-full border-2 border-transparent border-t-purple-300 border-r-purple-400 animate-spin"></div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">THINKING</span>
+              <span class="text-[10px] text-purple-400 font-mono mt-0.5">#a855f7</span>
+              <span class="text-[10px] text-zinc-500 mt-1">Gemini / AI plan</span>
+            </div>
+
+            <!-- 4. Executing -->
+            <div class="flex flex-col items-center">
+              <div class="w-24 h-24 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb orb-executing w-20 h-20 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 48px; height: 24px;"></div>
+                  <div class="absolute inset-1.5 rounded-full border-2 border-transparent border-t-amber-300 border-b-orange-400 animate-spin"></div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">EXECUTING</span>
+              <span class="text-[10px] text-orange-400 font-mono mt-0.5">#fb923c</span>
+              <span class="text-[10px] text-zinc-500 mt-1">MCP tool call</span>
+            </div>
+
+            <!-- 5. Speaking -->
+            <div class="flex flex-col items-center">
+              <div class="w-24 h-24 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb orb-speaking w-20 h-20 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 48px; height: 24px;"></div>
+                  <div class="absolute inset-0 flex items-center justify-center gap-1">
+                    <span class="w-0.5 bg-white rounded-full h-3"></span>
+                    <span class="w-0.5 bg-white rounded-full h-6"></span>
+                    <span class="w-0.5 bg-white rounded-full h-2"></span>
+                  </div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">SPEAKING</span>
+              <span class="text-[10px] text-teal-400 font-mono mt-0.5">#2dd4bf</span>
+              <span class="text-[10px] text-zinc-500 mt-1">Edge-TTS playback</span>
+            </div>
+
+            <!-- 6. Error -->
+            <div class="flex flex-col items-center">
+              <div class="w-24 h-24 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb orb-error w-20 h-20 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 48px; height: 24px;"></div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">ERROR</span>
+              <span class="text-[10px] text-rose-400 font-mono mt-0.5">#f43f5e</span>
+              <span class="text-[10px] text-zinc-500 mt-1">Network / API fail</span>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="h-px bg-white/10 my-6"></div>
+
+        <!-- 4 Themes -->
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-400 mb-6">B. Theme Variations</h3>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-6 text-center">
+            
+            <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 flex flex-col items-center">
+              <div class="w-20 h-20 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb w-16 h-16 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 38px; height: 20px;"></div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">Glassmorphism</span>
+              <span class="text-[10px] text-emerald-400 font-mono">Accent #1db954</span>
+            </div>
+
+            <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 flex flex-col items-center">
+              <div class="w-20 h-20 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb orb-sleek w-16 h-16 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 38px; height: 20px;"></div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">Sleek</span>
+              <span class="text-[10px] text-zinc-300 font-mono">Accent #f4f4f5</span>
+            </div>
+
+            <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 flex flex-col items-center">
+              <div class="w-20 h-20 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb orb-cyberpunk w-16 h-16 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 38px; height: 20px;"></div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">Cyberpunk</span>
+              <span class="text-[10px] text-pink-400 font-mono">Accent #ec4899 / #06b6d4</span>
+            </div>
+
+            <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 flex flex-col items-center">
+              <div class="w-20 h-20 mb-3 relative flex items-center justify-center">
+                <div class="glass-orb orb-aurora w-16 h-16 relative flex items-center justify-center">
+                  <div class="orb-glare" style="width: 38px; height: 20px;"></div>
+                </div>
+              </div>
+              <span class="text-xs font-bold text-white">Aurora</span>
+              <span class="text-[10px] text-indigo-400 font-mono">Accent #818cf8 / #a78bfa</span>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+
+  <!-- ==================== FOOTER INSTRUCTIONS ==================== -->
+  <footer class="max-w-[1500px] mx-auto mt-20 pt-8 border-t border-white/10 text-xs text-zinc-500 flex flex-col md:flex-row items-center justify-between gap-4">
+    <div>
+      Daisy AI Assistant • UI Architecture & Visual Specification for Figma Import
+    </div>
+    <div class="flex items-center gap-4">
+      <span>Self-contained HTML + Tailwind CDN</span>
+      <span>•</span>
+      <span>Ready for html.to.design plugin</span>
+    </div>
+  </footer>
+
+</body>
+</html>

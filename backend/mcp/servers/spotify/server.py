@@ -19,6 +19,7 @@ class SpotifyMCPServer:
     def __init__(self):
         self.sp = None
         self.auth_manager = None
+        self._last_network_error_time = 0
         self._init_client()
 
     def _init_client(self):
@@ -28,6 +29,9 @@ class SpotifyMCPServer:
             client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
             redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI", "http://localhost:8888/callback")
 
+            # Suppress noisy transient urllib3 retry warnings
+            logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
+
             if client_id and client_secret:
                 self.auth_manager = SpotifyOAuth(
                     client_id=client_id,
@@ -36,7 +40,11 @@ class SpotifyMCPServer:
                     scope="user-modify-playback-state user-read-playback-state",
                     open_browser=True
                 )
-                self.sp = Spotify(auth_manager=self.auth_manager)
+                self.sp = Spotify(
+                    auth_manager=self.auth_manager,
+                    requests_timeout=10,
+                    retries=1
+                )
                 logger.info("Spotify MCP Server successfully configured.")
             else:
                 logger.warning("SPOTIPY_CLIENT_ID or SPOTIPY_CLIENT_SECRET not set in environment.")
@@ -49,39 +57,33 @@ class SpotifyMCPServer:
             return None
         try:
             devices = self.sp.devices().get("devices", [])
-            # Check if one is already active
+            # Priority 1: Always prefer local Computer / Desktop device over third-party smart speakers
+            # Smart speakers (Amazon Echo, Nest, etc.) enforce strict API restrictions (403 Restriction violated)
+            computer_dev = next((d for d in devices if d.get("type") in ("Computer", "Desktop")), None)
+            if computer_dev:
+                return computer_dev["id"]
+
+            # Priority 2: If no Computer device is registered yet, launch Spotify desktop on PC
+            logger.info("No Computer Spotify device found. Launching Spotify desktop on PC...")
+            try:
+                import subprocess, time
+                subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
+                time.sleep(1.8)
+                refreshed = self.sp.devices().get("devices", [])
+                comp = next((d for d in refreshed if d.get("type") in ("Computer", "Desktop")), None)
+                if comp:
+                    return comp["id"]
+            except Exception as e:
+                logger.debug(f"Auto-launch Spotify notice: {e}")
+
+            # Priority 3: Check if an active device exists
             for dev in devices:
                 if dev.get("is_active"):
                     return dev.get("id")
 
-            # If devices exist but none are active, prefer Computer/Desktop, then Speaker/Echo, then any
+            # Priority 4: Fallback to first available device
             if devices:
-                computer_dev = next((d for d in devices if d.get("type") in ("Computer", "Desktop")), None)
-                target_dev = computer_dev or devices[0]
-                target_id = target_dev["id"]
-                try:
-                    self.sp.transfer_playback(device_id=target_id, force_play=False)
-                except Exception as e:
-                    logger.debug(f"Transfer playback notice: {e}")
-                return target_id
-
-            # If NO devices exist at all on Spotify Connect, try launching Spotify on Windows
-            logger.info("No Spotify Connect devices found. Attempting to launch Spotify desktop app...")
-            try:
-                import subprocess
-                import time
-                subprocess.Popen(["cmd", "/c", "start", "spotify:"], shell=True)
-                time.sleep(2.0)
-                devices = self.sp.devices().get("devices", [])
-                if devices:
-                    target_id = devices[0]["id"]
-                    try:
-                        self.sp.transfer_playback(device_id=target_id, force_play=False)
-                    except Exception:
-                        pass
-                    return target_id
-            except Exception as e:
-                logger.debug(f"Could not auto-launch Spotify: {e}")
+                return devices[0]["id"]
 
             return None
         except Exception as e:
@@ -192,8 +194,10 @@ class SpotifyMCPServer:
                 "auth_required": True,
                 "auth_url": "http://127.0.0.1:8000/auth/spotify"
             }
-
-        target_device_id = self._ensure_active_device()
+        # Ensure active device is resolved for all playback controls
+        target_device_id = None
+        if tool_name in ("play", "play_album", "resume", "next_track", "previous_track", "pause", "set_volume", "recommend_vibes"):
+            target_device_id = self._ensure_active_device()
 
         try:
             if tool_name == "play":
@@ -204,17 +208,32 @@ class SpotifyMCPServer:
                 tracks = results.get("tracks", {}).get("items", [])
                 if tracks:
                     track = tracks[0]
+                    playback_succeeded = False
                     try:
                         self.sp.start_playback(device_id=target_device_id, uris=[track["uri"]])
+                        playback_succeeded = True
                     except Exception as play_err:
-                        # Auto-retry with force_play transfer if device was in deep standby
-                        if target_device_id:
-                            try:
-                                self.sp.transfer_playback(device_id=target_device_id, force_play=True)
-                            except Exception:
-                                pass
-                        else:
-                            raise play_err
+                        logger.warning(f"Playback on {target_device_id} error: {play_err}")
+                        # Auto-retry by opening Spotify on PC if it failed on smart speaker
+                        try:
+                            import subprocess, time
+                            subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
+                            time.sleep(1.8)
+                            refreshed = self.sp.devices().get("devices", [])
+                            comp = next((d for d in refreshed if d.get("type") in ("Computer", "Desktop")), None)
+                            if comp:
+                                self.sp.start_playback(device_id=comp["id"], uris=[track["uri"]])
+                                playback_succeeded = True
+                        except Exception as fallback_err:
+                            logger.warning(f"PC fallback playback error: {fallback_err}")
+
+                    if not playback_succeeded:
+                        return {
+                            "status": "device_error",
+                            "error": "Could not start playback. Please make sure Spotify is open on your PC.",
+                            "message": "Spotify could not start playback. Please make sure Spotify is open on your PC."
+                        }
+
                     return {
                         "status": "playing",
                         "track": track["name"],
@@ -231,14 +250,30 @@ class SpotifyMCPServer:
                     alb = items[0]
                     tracks = self.sp.album_tracks(alb["id"])["items"]
                     uris = [t["uri"] for t in tracks]
+                    playback_succeeded = False
                     try:
                         self.sp.start_playback(device_id=target_device_id, uris=uris)
+                        playback_succeeded = True
                     except Exception:
-                        if target_device_id:
-                            try:
-                                self.sp.transfer_playback(device_id=target_device_id, force_play=True)
-                            except Exception:
-                                pass
+                        try:
+                            import subprocess, time
+                            subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
+                            time.sleep(1.8)
+                            refreshed = self.sp.devices().get("devices", [])
+                            comp = next((d for d in refreshed if d.get("type") in ("Computer", "Desktop")), None)
+                            if comp:
+                                self.sp.start_playback(device_id=comp["id"], uris=uris)
+                                playback_succeeded = True
+                        except Exception:
+                            pass
+
+                    if not playback_succeeded:
+                        return {
+                            "status": "device_error",
+                            "error": "Could not start playback. Please make sure Spotify is open on your PC.",
+                            "message": "Spotify could not start playback. Please make sure Spotify is open on your PC."
+                        }
+
                     return {"status": "playing_album", "album": alb["name"], "message": f"Playing album: {alb['name']}"}
                 return {"error": f"Album '{album}' not found."}
 
@@ -251,11 +286,25 @@ class SpotifyMCPServer:
                 return {"status": "resumed", "message": "Playback resumed."}
 
             elif tool_name == "next_track":
-                self.sp.next_track(device_id=target_device_id)
+                try:
+                    self.sp.next_track(device_id=target_device_id)
+                except Exception as next_err:
+                    if "NO_ACTIVE_DEVICE" in str(next_err) or "404" in str(next_err):
+                        target_device_id = self._ensure_active_device()
+                        self.sp.next_track(device_id=target_device_id)
+                    else:
+                        raise next_err
                 return {"status": "skipped", "message": "Skipped to next track."}
 
             elif tool_name == "previous_track":
-                self.sp.previous_track(device_id=target_device_id)
+                try:
+                    self.sp.previous_track(device_id=target_device_id)
+                except Exception as prev_err:
+                    if "NO_ACTIVE_DEVICE" in str(prev_err) or "404" in str(prev_err):
+                        target_device_id = self._ensure_active_device()
+                        self.sp.previous_track(device_id=target_device_id)
+                    else:
+                        raise prev_err
                 return {"status": "previous", "message": "Returning to previous track."}
 
             elif tool_name == "set_volume":
@@ -264,7 +313,27 @@ class SpotifyMCPServer:
                 return {"status": "volume_adjusted", "volume": vol, "message": f"Volume set to {vol}%."}
 
             elif tool_name == "get_playback":
-                pb = self.sp.current_playback()
+                import time
+                if time.time() - self._last_network_error_time < 5.0:
+                    return {
+                        "is_playing": False,
+                        "message": "Spotify unreachable (reconnecting...)",
+                        "device_name": "Offline",
+                        "volume_percent": 50
+                    }
+
+                try:
+                    pb = self.sp.current_playback()
+                except Exception as net_err:
+                    self._last_network_error_time = time.time()
+                    logger.debug(f"get_playback transient error: {net_err}")
+                    return {
+                        "is_playing": False,
+                        "message": "Network temporarily unreachable",
+                        "device_name": "Offline",
+                        "volume_percent": 50
+                    }
+
                 if pb and pb.get("item"):
                     item = pb["item"]
                     dev = pb.get("device") or {}
@@ -283,7 +352,10 @@ class SpotifyMCPServer:
                         "shuffle_state": pb.get("shuffle_state", False),
                         "repeat_state": pb.get("repeat_state", "off")
                     }
-                devices = self.sp.devices().get("devices", []) if self.sp else []
+                try:
+                    devices = self.sp.devices().get("devices", []) if self.sp else []
+                except Exception:
+                    devices = []
                 active_dev = next((d for d in devices if d.get("is_active")), devices[0] if devices else None)
                 return {
                     "is_playing": False,
@@ -306,8 +378,12 @@ class SpotifyMCPServer:
                 }
 
         except Exception as e:
+            import time
+            self._last_network_error_time = time.time()
             err_str = str(e)
-            if "invalid_grant" in err_str or "expired" in err_str.lower():
+            if "10051" in err_str or "10013" in err_str or "timed out" in err_str.lower() or "unreachable" in err_str.lower() or "connection" in err_str.lower():
+                return {"error": "Spotify server unreachable (network issue). Please check your internet connection."}
+            elif "invalid_grant" in err_str or "expired" in err_str.lower():
                 return {"error": "Spotify authorization required. Please visit http://127.0.0.1:8000/auth/spotify to connect your account."}
             elif "PREMIUM_REQUIRED" in err_str or "403" in err_str:
                 return {"error": "Spotify Premium is required for direct Web API playback control."}

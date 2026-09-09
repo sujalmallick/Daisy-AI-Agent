@@ -1,12 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Volume2, Music, RefreshCw } from 'lucide-react';
+import React, { useRef } from 'react';
+import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Volume2, Music, RefreshCw, Minimize2 } from 'lucide-react';
 
-interface NowPlayingCardProps {
-  onFoldBack: () => void;
-  onToast: (msg: string, meta: string) => void;
-}
-
-interface PlaybackState {
+export interface PlaybackState {
   isPlaying: boolean;
   trackTitle: string;
   trackArtist: string;
@@ -19,21 +14,29 @@ interface PlaybackState {
   repeatState: string;
 }
 
-export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({ onFoldBack, onToast }) => {
-  const [playback, setPlayback] = useState<PlaybackState>({
-    isPlaying: false,
-    trackTitle: 'Connecting to Spotify...',
-    trackArtist: 'Pulling live MCP session',
-    artworkUrl: null,
-    progressMs: 0,
-    durationMs: 0,
-    deviceName: 'Spotify',
-    volume: 50,
-    shuffleState: false,
-    repeatState: 'off',
-  });
+export interface NowPlayingCardProps {
+  playback: PlaybackState;
+  onFoldBack: () => void;
+  onToast: (msg: string, meta: string) => void;
+  onTogglePlay: () => void;
+  onNext: () => void;
+  onPrev: () => void;
+  onVolumeChange: (val: number) => void;
+  onRefresh?: () => void;
+  isLoading?: boolean;
+}
 
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({
+  playback,
+  onFoldBack,
+  onToast,
+  onTogglePlay,
+  onNext,
+  onPrev,
+  onVolumeChange,
+  onRefresh,
+  isLoading = false,
+}) => {
   const volumeDebounceRef = useRef<number | null>(null);
 
   const formatTime = (ms: number) => {
@@ -44,123 +47,14 @@ export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({ onFoldBack, onTo
     return `${min}:${sec < 10 ? '0' : ''}${sec}`;
   };
 
-  const fetchLivePlayback = async (silent: boolean = true) => {
-    if (!silent) setIsLoading(true);
-    try {
-      const res = await fetch('http://127.0.0.1:8000/playback');
-      if (res.ok) {
-        const data = await res.json();
-        const result = data?.result;
-        if (result && result.track) {
-          setPlayback({
-            isPlaying: !!result.is_playing,
-            trackTitle: result.track,
-            trackArtist: `${result.artist}${result.album ? ` • ${result.album}` : ''}`,
-            artworkUrl: result.artwork_url || null,
-            progressMs: result.progress_ms || 0,
-            durationMs: result.duration_ms || 0,
-            deviceName: result.device_name || 'Active Device',
-            volume: result.volume_percent ?? 50,
-            shuffleState: !!result.shuffle_state,
-            repeatState: result.repeat_state || 'off',
-          });
-        } else {
-          // No track currently active
-          setPlayback((prev) => ({
-            ...prev,
-            isPlaying: false,
-            trackTitle: 'No Track Playing',
-            trackArtist: 'Spotify is idle • Say "Daisy, play music"',
-            artworkUrl: null,
-            progressMs: 0,
-            durationMs: 0,
-            deviceName: result?.device_name || 'No Active Device',
-            volume: result?.volume_percent ?? prev.volume,
-          }));
-        }
-      }
-    } catch (err) {
-      console.warn('Playback fetch error:', err);
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
-  };
-
-  // Poll live playback every 3 seconds while card is open
-  useEffect(() => {
-    fetchLivePlayback(false);
-    const interval = window.setInterval(() => {
-      fetchLivePlayback(true);
-    }, 3000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  // Smoothly increment local progress bar when playing
-  useEffect(() => {
-    if (!playback.isPlaying || playback.durationMs <= 0) return;
-    const progressTimer = window.setInterval(() => {
-      setPlayback((prev) => {
-        if (!prev.isPlaying || prev.progressMs >= prev.durationMs) return prev;
-        return { ...prev, progressMs: Math.min(prev.durationMs, prev.progressMs + 1000) };
-      });
-    }, 1000);
-    return () => window.clearInterval(progressTimer);
-  }, [playback.isPlaying, playback.durationMs]);
-
-  const executeAction = async (action: string, value?: any, label?: string) => {
-    try {
-      let res = await fetch('http://127.0.0.1:8000/playback/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, value }),
-      });
-
-      // Fallback to /command if backend instance hasn't reloaded /playback/action yet
-      if (!res.ok && res.status === 404) {
-        let promptText = action;
-        if (action === 'pause') promptText = 'pause';
-        else if (action === 'resume' || action === 'play') promptText = 'resume';
-        else if (action === 'next') promptText = 'next song';
-        else if (action === 'previous') promptText = 'previous song';
-        else if (action === 'volume') promptText = `volume ${value}`;
-
-        res = await fetch('http://127.0.0.1:8000/command', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: promptText, speak_backend: false }),
-        });
-      }
-
-      if (label) onToast(label, 'Spotify MCP');
-      // Refresh immediately after action
-      setTimeout(() => fetchLivePlayback(true), 400);
-    } catch (err) {
-      console.warn(`Action '${action}' failed:`, err);
-    }
-  };
-
-  const togglePlay = () => {
-    const nextState = !playback.isPlaying;
-    setPlayback((prev) => ({ ...prev, isPlaying: nextState }));
-    executeAction(nextState ? 'resume' : 'pause', null, nextState ? 'Playback Resumed' : 'Playback Paused');
-  };
-
-  const handleNext = () => {
-    executeAction('next', null, 'Skipped to Next Track');
-  };
-
-  const handlePrev = () => {
-    executeAction('previous', null, 'Returning to Previous Track');
-  };
-
-  const handleVolumeChange = (newVal: number) => {
-    setPlayback((prev) => ({ ...prev, volume: newVal }));
+  const handleVolumeInput = (val: number) => {
+    onVolumeChange(val);
     if (volumeDebounceRef.current !== null) {
       window.clearTimeout(volumeDebounceRef.current);
     }
     volumeDebounceRef.current = window.setTimeout(() => {
-      executeAction('volume', newVal);
-    }, 250);
+      onToast(`Volume set to ${val}%`, 'Spotify MCP');
+    }, 400);
   };
 
   const progressPercent = playback.durationMs > 0
@@ -169,41 +63,57 @@ export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({ onFoldBack, onTo
 
   return (
     <div
-      onDoubleClick={(e) => {
-        // Prevent folding if clicking buttons/sliders
-        if ((e.target as HTMLElement).tagName !== 'BUTTON' && (e.target as HTMLElement).tagName !== 'INPUT') {
-          onFoldBack();
-        }
+      className="w-[310px] now-playing-card p-5 flex flex-col justify-between select-none shadow-2xl backdrop-blur-2xl bg-[#0c0f14]/90 border border-white/10 rounded-3xl transition-all duration-300"
+      style={{
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.15)',
       }}
-      className="w-[310px] now-playing-card p-6 flex flex-col justify-between select-none shadow-2xl transition-all duration-300"
     >
-      {/* Header: NOW PLAYING & Real Connected Device Pill */}
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[12px] font-bold tracking-wider text-zinc-400 uppercase">NOW PLAYING</span>
-          <button
-            onClick={() => fetchLivePlayback(false)}
-            title="Refresh Spotify status"
-            className="p-1 text-zinc-500 hover:text-zinc-300 transition cursor-pointer"
-          >
-            <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-emerald-400' : ''}`} />
-          </button>
+      {/* Header: NOW PLAYING & Device Pill & Close Button */}
+      <div className="flex items-center justify-between mb-3.5 data-tauri-drag-region pywebview-drag-region cursor-move">
+        <div className="flex items-center gap-1.5 no-drag">
+          <span className="text-[11px] font-bold tracking-wider text-zinc-400 uppercase">NOW PLAYING</span>
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              title="Refresh Spotify status"
+              className="p-1 text-zinc-500 hover:text-zinc-300 transition cursor-pointer"
+            >
+              <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-emerald-400' : ''}`} />
+            </button>
+          )}
         </div>
 
-        <div className="flex items-center gap-2 bg-[#1e2329]/90 px-3 py-1.5 rounded-full border border-white/5 text-[11px] text-zinc-300 max-w-[150px] truncate" title={playback.deviceName}>
-          <span className={`w-2 h-2 rounded-full ${playback.isPlaying ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-          <span className="truncate">{playback.deviceName}</span>
+        <div className="flex items-center gap-2 no-drag">
+          <div
+            className="flex items-center gap-1.5 bg-[#1e2329]/90 px-2.5 py-1 rounded-full border border-white/5 text-[10px] text-zinc-300 max-w-[130px] truncate"
+            title={playback.deviceName}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${playback.isPlaying ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+            <span className="truncate">{playback.deviceName}</span>
+          </div>
+
+          <button
+            onClick={onFoldBack}
+            className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/15 text-zinc-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            title="Fold back to compact player"
+          >
+            <Minimize2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
-      {/* Album Cover with Vinyl Peeking & Real Artwork */}
-      <div className="relative w-full aspect-square my-2 flex items-center justify-center">
+      {/* Album Cover with Vinyl Peeking */}
+      <div className="relative w-full aspect-square my-1.5 flex items-center justify-center">
         {/* Vinyl Record Behind Art */}
-        <div className={`absolute right-2 w-[85%] h-[85%] rounded-full bg-[#18181b] border-4 border-[#09090b] shadow-2xl flex items-center justify-center overflow-hidden transform translate-x-4 transition-transform duration-700 ${playback.isPlaying ? 'rotate-12' : ''}`}>
+        <div
+          className={`absolute right-1 w-[85%] h-[85%] rounded-full bg-[#18181b] border-4 border-[#09090b] shadow-2xl flex items-center justify-center overflow-hidden transform translate-x-3.5 transition-transform duration-700 ${
+            playback.isPlaying ? 'rotate-12' : ''
+          }`}
+        >
           <div className="w-full h-full rounded-full border border-zinc-700/30 flex items-center justify-center">
             <div className="w-2/3 h-2/3 rounded-full border border-zinc-700/20 flex items-center justify-center">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-amber-600 via-orange-500 to-amber-700 flex items-center justify-center shadow-inner">
-                <div className="w-4 h-4 rounded-full bg-black" />
+              <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-emerald-600 via-teal-500 to-emerald-700 flex items-center justify-center shadow-inner">
+                <div className="w-3.5 h-3.5 rounded-full bg-black" />
               </div>
             </div>
           </div>
@@ -219,14 +129,14 @@ export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({ onFoldBack, onTo
             />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-950 p-4 text-center">
-              <Music className="w-12 h-12 text-emerald-400/40 mb-2" />
+              <Music className="w-10 h-10 text-emerald-400/40 mb-1.5" />
               <span className="text-[11px] text-zinc-400 font-medium">Spotify MCP</span>
               <span className="text-[9px] text-zinc-600">Daisy Assistant</span>
             </div>
           )}
 
           {/* Status Badge */}
-          <div className="absolute top-2.5 right-2.5 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-full text-[10px] font-semibold border flex items-center gap-1.5 transition-all">
+          <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-full text-[9px] font-semibold border flex items-center gap-1.5">
             {playback.isPlaying ? (
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -248,8 +158,8 @@ export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({ onFoldBack, onTo
       </div>
 
       {/* Track Info */}
-      <div className="text-center my-3 px-1">
-        <h2 className="text-lg font-bold text-white tracking-tight truncate" title={playback.trackTitle}>
+      <div className="text-center my-2.5 px-1">
+        <h2 className="text-base font-bold text-white tracking-tight truncate" title={playback.trackTitle}>
           {playback.trackTitle}
         </h2>
         <p className="text-xs text-zinc-400 mt-0.5 truncate" title={playback.trackArtist}>
@@ -258,85 +168,85 @@ export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({ onFoldBack, onTo
       </div>
 
       {/* Scrubber & Timestamps */}
-      <div className="my-2">
+      <div className="my-1.5">
         <div className="w-full bg-[#2a2e35] h-1.5 rounded-full overflow-hidden relative">
           <div
             className="bg-emerald-400 h-full rounded-full transition-all duration-300 shadow-[0_0_8px_#34d399]"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
-        <div className="flex justify-between text-[11px] text-zinc-400 mt-1.5 font-mono">
+        <div className="flex justify-between text-[10px] text-zinc-400 mt-1 font-mono">
           <span>{formatTime(playback.progressMs)}</span>
           <span>{formatTime(playback.durationMs)}</span>
         </div>
       </div>
 
-      {/* Transport Controls (Active MCP Triggers) */}
-      <div className="flex items-center justify-between px-2 my-2">
+      {/* Transport Controls */}
+      <div className="flex items-center justify-between px-1 my-1.5">
         <button
-          className={`p-1 transition cursor-pointer ${playback.shuffleState ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+          className={`p-1.5 transition cursor-pointer ${playback.shuffleState ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           title="Shuffle"
         >
-          <Shuffle className="w-4 h-4" />
+          <Shuffle className="w-3.5 h-3.5" />
         </button>
 
         <button
-          onClick={handlePrev}
+          onClick={onPrev}
           className="text-zinc-300 hover:text-white transition p-1 hover:scale-110 active:scale-95 cursor-pointer"
           title="Previous Track"
         >
-          <SkipBack className="w-5 h-5 fill-current" />
+          <SkipBack className="w-4 h-4 fill-current" />
         </button>
 
         <button
-          onClick={togglePlay}
-          className="w-12 h-12 rounded-full bg-emerald-400 hover:bg-emerald-300 text-black flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition cursor-pointer"
+          onClick={onTogglePlay}
+          className="w-11 h-11 rounded-full bg-emerald-400 hover:bg-emerald-300 text-black flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition cursor-pointer"
           title={playback.isPlaying ? 'Pause' : 'Play'}
         >
           {playback.isPlaying ? (
-            <Pause className="w-6 h-6 fill-current" />
+            <Pause className="w-5 h-5 fill-current" />
           ) : (
-            <Play className="w-6 h-6 fill-current ml-0.5" />
+            <Play className="w-5 h-5 fill-current ml-0.5" />
           )}
         </button>
 
         <button
-          onClick={handleNext}
+          onClick={onNext}
           className="text-zinc-300 hover:text-white transition p-1 hover:scale-110 active:scale-95 cursor-pointer"
           title="Next Track"
         >
-          <SkipForward className="w-5 h-5 fill-current" />
+          <SkipForward className="w-4 h-4 fill-current" />
         </button>
 
         <button
-          className={`p-1 transition cursor-pointer ${playback.repeatState !== 'off' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+          className={`p-1.5 transition cursor-pointer ${playback.repeatState !== 'off' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           title={`Repeat: ${playback.repeatState}`}
         >
-          <Repeat className="w-4 h-4" />
+          <Repeat className="w-3.5 h-3.5" />
         </button>
       </div>
 
       {/* Volume Slider Row */}
-      <div className="flex items-center gap-2.5 pt-3 mt-1 border-t border-white/5">
-        <Volume2 className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
+      <div className="flex items-center gap-2 pt-2.5 mt-0.5 border-t border-white/5">
+        <Volume2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
         <input
           type="range"
           min="0"
           max="100"
           value={playback.volume}
-          onChange={(e) => handleVolumeChange(Number(e.target.value))}
+          onChange={(e) => handleVolumeInput(Number(e.target.value))}
           className="w-full accent-emerald-400 cursor-pointer"
         />
-        <span className="text-[11px] font-mono text-zinc-400 w-7 text-right">{playback.volume}%</span>
+        <span className="text-[10px] font-mono text-zinc-400 w-6 text-right">{playback.volume}%</span>
       </div>
 
       {/* Fold Back Trigger */}
-      <div className="mt-4 pt-2 text-center border-t border-white/[0.04]">
+      <div className="mt-2.5 pt-1.5 text-center border-t border-white/[0.04]">
         <button
           onClick={onFoldBack}
-          className="text-[11px] text-zinc-500 hover:text-zinc-300 transition cursor-pointer"
+          className="text-[10px] text-zinc-500 hover:text-zinc-300 transition cursor-pointer"
         >
-          Fold back to Orb (or double-click)
+          Fold back to compact
         </button>
       </div>
     </div>

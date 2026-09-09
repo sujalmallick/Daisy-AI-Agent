@@ -16,6 +16,7 @@ from backend.hardware import detect_hardware_tier
 from backend.agent.planner import agentic_planner
 from datetime import datetime
 from backend.voice.tts_engine import TTSEngine
+from backend.voice.tts_manager import tts_manager
 
 # In-Memory Live Logs Buffer
 LOG_BUFFER = []
@@ -69,13 +70,30 @@ if os.path.exists(DIST_DIR):
 class CommandRequest(BaseModel):
     prompt: str
     speak_backend: bool = True
+    assistant_name: Optional[str] = None
+
+class AssistantConfigRequest(BaseModel):
+    name: str
+
+@app.get("/config/assistant")
+def get_assistant_config():
+    from backend.agent.alexa_grammar import AlexaIntentParser
+    return {"name": AlexaIntentParser.wake_word.title()}
+
+@app.post("/config/assistant")
+def set_assistant_config(req: AssistantConfigRequest):
+    from backend.agent.alexa_grammar import AlexaIntentParser
+    if req.name and req.name.strip():
+        AlexaIntentParser.set_wake_word(req.name.strip())
+    return {"name": AlexaIntentParser.wake_word.title(), "status": "updated"}
 
 @app.get("/")
 def health_check():
     hw = detect_hardware_tier()
+    from backend.agent.alexa_grammar import AlexaIntentParser
     return {
         "status": "online",
-        "assistant": "Daisy 🌼",
+        "assistant": AlexaIntentParser.wake_word.title(),
         "hardware_tier": hw["tier_name"],
         "device": hw["device"],
         "gpu_name": hw.get("gpu_name")
@@ -93,8 +111,21 @@ async def handle_command(req: CommandRequest):
     if not prompt:
         return {"error": "Empty prompt received."}
 
+    if req.assistant_name:
+        from backend.agent.alexa_grammar import AlexaIntentParser
+        AlexaIntentParser.set_wake_word(req.assistant_name)
+
     logger.info(f"Processing command: '{prompt}'")
-    result = agentic_planner.process(prompt)
+    try:
+        result = agentic_planner.process(prompt)
+    except Exception as e:
+        logger.error(f"Error processing command '{prompt}': {e}", exc_info=True)
+        return {
+            "source": "error_handler",
+            "spoken_reply": "I ran into an issue while processing that. Please try again.",
+            "error": str(e),
+            "status": "failed"
+        }
 
     # Trigger spoken voice response (TTS) asynchronously if enabled
     spoken = result.get("spoken_reply")
@@ -169,11 +200,142 @@ def get_system_status():
         "tools": mcp_manager.get_all_tools_schema()
     }
 
+
+# ── Voice / TTS Endpoints ─────────────────────────────────────────────────────
+
+class VoiceConfigUpdateRequest(BaseModel):
+    provider: Optional[str] = None   # "edge-tts" | "windows-tts" | "disabled"
+    voice: Optional[str] = None      # Edge-TTS voice name
+    windows_voice: Optional[str] = None  # Windows SAPI voice name
+    rate: Optional[float] = None
+    pitch: Optional[float] = None
+
+@app.get("/voice/config")
+def get_voice_config():
+    """Return current voice configuration and available voice options."""
+    return tts_manager.get_config()
+
+@app.post("/voice/config")
+def update_voice_config(req: VoiceConfigUpdateRequest):
+    """Update and persist voice configuration."""
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    config = tts_manager.update_config(updates)
+    logger.info(f"[Voice] Config updated: {updates}")
+    return {"status": "ok", **config}
+
+@app.get("/voice/voices")
+def list_voices():
+    """List all available voices grouped by provider."""
+    cfg = tts_manager.get_config()
+    return {
+        "edge_voices": cfg.get("edge_voices", []),
+        "windows_voices": cfg.get("windows_voices", []),
+    }
+
+@app.get("/voice/synthesize")
+def synthesize_voice(text: str):
+    """
+    Synthesize text to audio bytes and stream to frontend.
+    Used by the TTSClient in the browser to play Daisy's voice.
+    Returns MP3 (Edge-TTS) or WAV (Windows TTS).
+    """
+    from fastapi.responses import Response
+    if not text or not text.strip():
+        return Response(status_code=204)
+
+    result = tts_manager.synthesize_to_bytes(text.strip())
+    if result is None:
+        # Provider is disabled or synthesis failed
+        return Response(status_code=204)
+
+    audio_bytes, mime = result
+    return Response(
+        content=audio_bytes,
+        media_type=mime,
+        headers={
+            "Cache-Control": "no-cache",
+            "Content-Length": str(len(audio_bytes)),
+        }
+    )
+
 @app.post("/voice/test")
 def test_voice():
+    """Trigger a test phrase via the active TTS provider (plays on server speakers)."""
     test_phrase = "Daisy voice engine is online and working."
-    TTSEngine.speak(test_phrase)
-    return {"spoken": test_phrase, "status": "dispatched"}
+    tts_manager.speak(test_phrase)
+    return {"spoken": test_phrase, "status": "dispatched", "provider": tts_manager.provider}
+
+@app.post("/voice/stop")
+def stop_voice():
+    """Immediately stop any active TTS playback (called during barge-in)."""
+    tts_manager.stop()
+    return {"status": "stopped"}
+
+@app.post("/system/exit")
+def exit_system():
+    """Terminates Daisy backend and host process cleanly after farewell speech."""
+    import time
+    logger.info("Shutdown requested via voice/system. Exiting Daisy...")
+    def _delayed_exit():
+        time.sleep(1.8)
+        os._exit(0)
+    threading.Thread(target=_delayed_exit, daemon=True).start()
+    return {"status": "exiting", "message": "Sayonara! Goodbye!"}
+
+
+
+# --- Custom MCP & Tools Endpoints ---
+class CustomToolCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    type: str = "command" # 'command' or 'http'
+    command: Optional[str] = None
+    url: Optional[str] = None
+    method: Optional[str] = "GET"
+    headers: Optional[Dict[str, Any]] = None
+    parameters: Optional[Dict[str, Any]] = None
+    trigger_phrases: Optional[List[str]] = None
+    timeout: Optional[int] = 15
+    enabled: bool = True
+
+class CustomToolTestRequest(BaseModel):
+    name: str
+    args: Optional[Dict[str, Any]] = None
+
+class OpenBrowserRequest(BaseModel):
+    url: str
+
+@app.get("/mcp/custom")
+def get_custom_tools():
+    from backend.mcp.custom_loader import custom_tool_manager
+    return {"tools": custom_tool_manager.get_tools()}
+
+@app.post("/mcp/custom")
+def add_custom_tool(req: CustomToolCreateRequest):
+    from backend.mcp.custom_loader import custom_tool_manager
+    try:
+        saved = custom_tool_manager.add_or_update_tool(req.model_dump())
+        return {"status": "success", "tool": saved}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.delete("/mcp/custom/{tool_name}")
+def delete_custom_tool(tool_name: str):
+    from backend.mcp.custom_loader import custom_tool_manager
+    deleted = custom_tool_manager.delete_tool(tool_name)
+    return {"status": "deleted" if deleted else "not_found", "tool": tool_name}
+
+@app.post("/mcp/custom/test")
+def test_custom_tool(req: CustomToolTestRequest):
+    from backend.mcp.custom_loader import custom_tool_manager
+    res = custom_tool_manager.test_tool(req.name, req.args or {})
+    return res
+
+@app.post("/system/open-browser")
+def open_system_browser(req: OpenBrowserRequest):
+    import webbrowser
+    success = webbrowser.open(req.url)
+    return {"status": "launched" if success else "dispatched", "url": req.url}
 
 @app.get("/auth/spotify")
 def auth_spotify():
@@ -239,7 +401,7 @@ class SpotifyPort5000Handler(BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header("Content-type", "text/html; charset=utf-8")
                     self.end_headers()
-                    html = """
+                    success_html = """
                     <!DOCTYPE html>
                     <html>
                       <body style="background:#07090e;color:#10b981;font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;">
@@ -250,7 +412,7 @@ class SpotifyPort5000Handler(BaseHTTPRequestHandler):
                       </body>
                     </html>
                     """
-                    self.wfile.write(html.encode("utf-8"))
+                    self.wfile.write(success_html.encode("utf-8"))
                     return
                 except Exception as e:
                     self.send_response(500)

@@ -32,6 +32,17 @@ class MCPManager:
 
         logger.info(f"Registered MCP server '{server_name}' with {len(self.get_server_tools(server_name))} tools.")
 
+    def unregister_server(self, server_name: str):
+        """Unregisters an MCP server and removes its tools from the registry."""
+        if server_name in self._servers:
+            del self._servers[server_name]
+        prefix = f"{server_name}."
+        tools_to_remove = [k for k in self._tools if k.startswith(prefix)]
+        for k in tools_to_remove:
+            self._tools.pop(k, None)
+            self._handlers.pop(k, None)
+        logger.info(f"Unregistered MCP server '{server_name}' ({len(tools_to_remove)} tools removed).")
+
     def get_server_tools(self, server_name: str) -> List[Dict[str, Any]]:
         return [t for name, t in self._tools.items() if name.startswith(f"{server_name}.")]
 
@@ -90,5 +101,7 @@ try:
     import backend.mcp.servers.spotify.server
     import backend.mcp.servers.filesystem.server
     import backend.mcp.servers.app_launcher.server
+    from backend.mcp.custom_loader import custom_tool_manager
+    custom_tool_manager.sync_into_mcp_manager()
 except Exception as _err:
     logger.warning(f"Failed to auto-register default MCP servers: {_err}")

@@ -15,16 +15,18 @@ export const ToastGlider: React.FC<ToastGliderProps> = ({
 }) => {
   return (
     <div
-      className={`mb-4 transition-all duration-300 pointer-events-none z-30 ${
-        visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+      className={`transition-all duration-300 pointer-events-none z-40 ${
+        visible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 -translate-y-2 scale-95'
       }`}
     >
-      <div className="px-4 py-2 rounded-xl bg-zinc-900/90 border border-white/10 backdrop-blur-xl flex items-center gap-2.5 text-xs text-white shadow-xl">
-        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: accentColor }} />
-        <span className="font-medium tracking-tight truncate max-w-xs">{message}</span>
-        <span className="text-[11px] text-zinc-400 pl-2 border-l border-white/10 flex-shrink-0 font-mono">
-          {meta}
-        </span>
+      <div className="px-2.5 py-1 rounded-full bg-black/90 border border-white/15 backdrop-blur-xl flex items-center gap-1.5 text-[11px] text-white shadow-xl max-w-[200px]">
+        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse" style={{ background: accentColor }} />
+        <span className="font-medium tracking-tight truncate flex-1">{message}</span>
+        {meta && (
+          <span className="text-[10px] text-zinc-400 pl-1.5 border-l border-white/10 flex-shrink-0 font-mono">
+            {meta}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-﻿import os
+import os
 import glob
 import shutil
 import subprocess
@@ -63,6 +63,20 @@ class AppLauncherMCPServer:
                         "app_name": {
                             "type": "string",
                             "description": "Name of the application to launch e.g. 'Spotify', 'Chrome', 'VS Code', 'Notepad', 'Calculator'"
+                        }
+                    },
+                    "required": ["app_name"]
+                }
+            },
+            {
+                "name": "close_app",
+                "description": "Closes or terminates a running desktop application on the user's Windows computer.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "app_name": {
+                            "type": "string",
+                            "description": "Name of the application to close e.g. 'Chrome', 'Notepad', 'Spotify', 'Calculator'"
                         }
                     },
                     "required": ["app_name"]
@@ -163,6 +177,76 @@ class AppLauncherMCPServer:
             except Exception as e:
                 logger.error(f"App launch failed for '{raw_app}': {e}")
                 return {"error": f"Could not launch '{raw_app}': {e}"}
+
+        elif tool_name == "close_app":
+            raw_app = args.get("app_name", "").strip()
+            if not raw_app:
+                return {"error": "Please specify an application name to close."}
+
+            norm = raw_app.lower()
+
+            # Executable name mapping for Windows
+            EXE_MAP = {
+                "spotify": "Spotify.exe",
+                "chrome": "chrome.exe",
+                "google chrome": "chrome.exe",
+                "edge": "msedge.exe",
+                "microsoft edge": "msedge.exe",
+                "browser": "msedge.exe",
+                "notepad": "notepad.exe",
+                "calculator": "CalculatorApp.exe",
+                "calc": "CalculatorApp.exe",
+                "vscode": "Code.exe",
+                "vs code": "Code.exe",
+                "code": "Code.exe",
+                "visual studio code": "Code.exe",
+                "discord": "Discord.exe",
+                "steam": "steam.exe",
+                "terminal": "WindowsTerminal.exe",
+                "windows terminal": "WindowsTerminal.exe",
+                "powershell": "powershell.exe",
+                "cmd": "cmd.exe",
+                "command prompt": "cmd.exe",
+                "paint": "mspaint.exe",
+                "task manager": "Taskmgr.exe",
+                "taskmgr": "Taskmgr.exe",
+                "word": "WINWORD.EXE",
+                "excel": "EXCEL.EXE",
+                "powerpoint": "POWERPNT.EXE",
+            }
+
+            target_exe = EXE_MAP.get(norm, f"{norm}.exe" if not norm.endswith(".exe") else norm)
+            display = self.KNOWN_APPS.get(norm, (None, raw_app.title()))[1]
+
+            try:
+                res = subprocess.run(
+                    ["taskkill", "/F", "/IM", target_exe],
+                    capture_output=True,
+                    text=True
+                )
+                if res.returncode == 0:
+                    logger.info(f"Closed app: {display} ({target_exe})")
+                    return {
+                        "status": "app_closed",
+                        "app": display,
+                        "message": f"Closed {display}."
+                    }
+                else:
+                    # Fallback: try Stop-Process by clean name
+                    p_name = target_exe.replace(".exe", "")
+                    subprocess.run(
+                        ["powershell", "-NoProfile", "-Command", f"Stop-Process -Name '{p_name}' -Force -ErrorAction SilentlyContinue"],
+                        capture_output=True,
+                        text=True
+                    )
+                    return {
+                        "status": "app_closed",
+                        "app": display,
+                        "message": f"Closed {display}."
+                    }
+            except Exception as e:
+                logger.error(f"Failed to close '{raw_app}': {e}")
+                return {"error": f"Could not close '{raw_app}': {e}"}
 
         elif tool_name == "list_installed_apps":
             apps = list(set([display for _, (_, display) in self.KNOWN_APPS.items()]))

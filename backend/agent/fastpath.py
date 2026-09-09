@@ -18,6 +18,32 @@ class FastPathEngine:
         Attempts to resolve simple music commands immediately via MCP.
         Returns execution result or None if it requires complex reasoning.
         """
+        # Check custom tool trigger phrases first (0 tokens)
+        from backend.mcp.custom_loader import custom_tool_manager
+        custom_match = custom_tool_manager.match_trigger(prompt)
+        if custom_match:
+            tool_name, _ = custom_match
+            res = mcp_manager.execute(f"custom.{tool_name}")
+            out = res.get("result", {}).get("output", "")
+            if isinstance(out, dict):
+                out_str = ", ".join(f"{k} is {v}" for k, v in out.items())
+            else:
+                out_str = str(out)
+            return {
+                "mode": "fastpath_custom_mcp",
+                "tokens_consumed": 0,
+                "latency_ms": res.get("result", {}).get("latency_ms", 10),
+                "actions_executed": 1,
+                "results": [{
+                    "success": res.get("success", False),
+                    "tool": f"custom.{tool_name}",
+                    "result": {
+                        "status": "completed",
+                        "message": f"{tool_name.replace('_', ' ').title()}: {out_str}"
+                    }
+                }]
+            }
+
         parsed_intents = AlexaIntentParser.parse(prompt)
         
         # If any command requires LLM delegation, return None so planner can handle it
@@ -67,6 +93,22 @@ class FastPathEngine:
                 app_name = slots.get("app_name", "")
                 results.append(mcp_manager.execute("app_launcher.launch_app", {"app_name": app_name}))
 
+            elif action == "close_app":
+                app_name = slots.get("app_name", "")
+                results.append(mcp_manager.execute("app_launcher.close_app", {"app_name": app_name}))
+
+            elif action == "exit_app":
+                results.append({
+                    "success": True,
+                    "tool": "system.exit_app",
+                    "result": {
+                        "status": "exiting",
+                        "action": "exit_app",
+                        "should_exit": True,
+                        "message": "Sayonara! Goodbye!"
+                    }
+                })
+
             elif action == "wake_greeting":
                 results.append({
                     "success": True,
@@ -91,7 +133,7 @@ class FastPathEngine:
                     "success": True,
                     "tool": "system.identity",
                     "result": {
-                        "message": "I am Daisy, your desktop AI voice assistant running locally on your PC!"
+                        "message": f"I am {AlexaIntentParser.wake_word.title()}, your desktop AI voice assistant running locally on your PC!"
                     }
                 })
 

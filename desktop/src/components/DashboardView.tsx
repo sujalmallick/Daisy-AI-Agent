@@ -88,16 +88,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onBackToOrb, onSpe
   };
 
   const handleTestVoice = async () => {
-    const phrase = "Daisy voice engine is working smoothly on your computer.";
-    setTestResult("Speaking aloud via audio engine...");
+    const phrase = "Hi! I'm Daisy, your voice assistant. Everything sounds great!";
+    setTestResult("Playing test phrase...");
+    // Use only onSpeak — do NOT call /voice/test endpoint to avoid dual playback
     onSpeak(phrase);
-    try {
-      await fetch('http://127.0.0.1:8000/voice/test', { method: 'POST' });
-    } catch {
-      // Handled by browser TTS
-    }
-    setTimeout(() => setTestResult("Voice test completed successfully!"), 2500);
+    setTimeout(() => setTestResult("Voice test complete!"), 3000);
   };
+
 
   const filteredLogs = logs.filter(l => {
     if (logFilter === 'ALL') return true;
