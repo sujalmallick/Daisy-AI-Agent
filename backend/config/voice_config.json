@@ -1,6 +1,6 @@
 {
   "provider": "edge-tts",
-  "voice": "en-US-JennyNeural",
+  "voice": "en-IN-NeerjaNeural",
   "windows_voice": "Microsoft Zira Desktop",
   "rate": 1.05,
   "pitch": 1.02

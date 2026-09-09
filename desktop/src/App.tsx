@@ -190,6 +190,7 @@ export function App() {
       currentWidgetModeRef.current = targetMode;
       resizeWidget(targetMode);
       setWidgetOnTop(onTop);
+      setNativeWindowMode(appMode === 'window' ? 'window' : 'floating');
     }
   }, [appMode, isSettingsOpen, hasActiveTrack, playerMode, isPlayerTucked]);
 
@@ -739,8 +740,8 @@ export function App() {
 
             {/* Center Content Stack */}
             <div className="w-full max-w-2xl flex flex-col items-center justify-center z-10">
-              {/* 3D Glass Orb with Top Badge */}
-              <div className="mb-2">
+              {/* 3D Glass Orb with Top Badge and Compact Player Beside It When Active */}
+              <div className="mb-2 flex items-center justify-center gap-4">
                 <FloatingOrb
                   orbState={orbState}
                   theme={theme}
@@ -751,6 +752,22 @@ export function App() {
                   isToastVisible={toastVisible}
                   disableDrag={true}
                 />
+                {hasActiveTrack && (
+                  <div className="shrink-0 animate-in fade-in slide-in-from-left-3 duration-300">
+                    <CompactPlayer
+                      trackTitle={playback.trackTitle}
+                      trackArtist={playback.trackArtist}
+                      artworkUrl={playback.artworkUrl}
+                      isPlaying={playback.isPlaying}
+                      progressMs={playback.progressMs}
+                      durationMs={playback.durationMs}
+                      onTogglePlay={togglePlay}
+                      onNext={handleNext}
+                      onPrev={handlePrev}
+                      onExpand={() => {}}
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Typography Prompt & Subtitle */}
@@ -844,32 +861,6 @@ export function App() {
                 </button>
               </div>
             </div>
-
-            {/* Bottom Spotify Indicator (Non-intrusive pill on bottom left if music is playing) */}
-            {hasActiveTrack && (
-              <div className="absolute bottom-5 left-6 flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-black/75 border border-white/10 backdrop-blur-md text-xs text-zinc-300 shadow-lg animate-in fade-in duration-300 z-20">
-                <Music className={`w-3.5 h-3.5 ${playback.isPlaying ? 'animate-pulse text-emerald-400' : 'text-zinc-400'}`} />
-                <span className="font-medium text-white max-w-[160px] truncate">{playback.trackTitle}</span>
-                <span className="text-zinc-500">•</span>
-                <span className="text-zinc-400 max-w-[120px] truncate">{playback.trackArtist}</span>
-                <div className="flex items-center gap-1 ml-1">
-                  <button
-                    onClick={togglePlay}
-                    className="w-6 h-6 rounded-full hover:bg-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition cursor-pointer"
-                    title={playback.isPlaying ? 'Pause' : 'Play'}
-                  >
-                    {playback.isPlaying ? '⏸' : '▶'}
-                  </button>
-                  <button
-                    onClick={handleNext}
-                    className="w-6 h-6 rounded-full hover:bg-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition cursor-pointer"
-                    title="Next track"
-                  >
-                    ⏭
-                  </button>
-                </div>
-              </div>
-            )}
 
             {/* Circular Dot Floating Button (Switches into Floating Widget Overlay) */}
             <button
@@ -1020,6 +1011,7 @@ export function App() {
                 durationMs={playback.durationMs}
                 onTogglePlay={togglePlay}
                 onNext={handleNext}
+                onPrev={handlePrev}
                 onExpand={() => setPlayerMode('expanded')}
                 onTuck={() => setIsPlayerTucked(true)}
               />

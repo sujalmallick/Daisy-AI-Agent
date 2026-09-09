@@ -7,12 +7,25 @@ export interface WidgetDimensions {
 
 export const WIDGET_DIMENSIONS: Record<WidgetViewMode, WidgetDimensions> = {
   window: { width: 940, height: 680 },
-  orb: { width: 240, height: 240 },
-  compact: { width: 510, height: 240 },
-  expanded: { width: 540, height: 560 },
-  settings: { width: 620, height: 480 },
+  orb: { width: 250, height: 260 },
+  compact: { width: 620, height: 260 },
+  expanded: { width: 580, height: 520 },
+  settings: { width: 640, height: 500 },
   dashboard: { width: 880, height: 660 },
 };
+
+/**
+ * Clamps coordinates to the available screen working area.
+ */
+export function clampWidgetPositionToScreen(x: number, y: number, width: number, height: number): { x: number; y: number } {
+  if (typeof window === 'undefined' || !window.screen) return { x, y };
+  const availW = window.screen.availWidth || 1920;
+  const availH = window.screen.availHeight || 1080;
+  const margin = 16;
+  const clampedX = Math.max(margin, Math.min(x, availW - width - margin));
+  const clampedY = Math.max(margin, Math.min(y, availH - height - margin));
+  return { x: clampedX, y: clampedY };
+}
 
 /**
  * Resizes the native floating desktop window dynamically.
@@ -22,6 +35,36 @@ export async function resizeWidget(mode: WidgetViewMode, customDimensions?: Widg
   const dims = customDimensions || WIDGET_DIMENSIONS[mode];
   const width = Math.round(dims.width);
   const height = Math.round(dims.height);
+
+  // Check and clamp saved position if expanding near screen edge
+  try {
+    const rawX = localStorage.getItem('daisy_widget_pos_x');
+    const rawY = localStorage.getItem('daisy_widget_pos_y');
+    if (rawX !== null && rawY !== null) {
+      const curX = parseInt(rawX, 10);
+      const curY = parseInt(rawY, 10);
+      if (!isNaN(curX) && !isNaN(curY)) {
+        const clamped = clampWidgetPositionToScreen(curX, curY, width, height);
+        if (clamped.x !== curX || clamped.y !== curY) {
+          saveWidgetPosition(clamped.x, clamped.y);
+          // 1. Tauri v2
+          if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+            try {
+              const { invoke } = await import('@tauri-apps/api/core');
+              await invoke('set_window_position', { x: clamped.x, y: clamped.y });
+            } catch {}
+          }
+          // 2. pywebview
+          const pywebview = (window as unknown as { pywebview?: { api?: { set_window_position?: (x: number, y: number) => Promise<unknown> } } }).pywebview;
+          if (pywebview?.api?.set_window_position) {
+            try {
+              await pywebview.api.set_window_position(clamped.x, clamped.y);
+            } catch {}
+          }
+        }
+      }
+    }
+  } catch {}
 
   // 1. Tauri v2 invoke (only if running inside Tauri)
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {

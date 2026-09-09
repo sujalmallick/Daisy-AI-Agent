@@ -22,20 +22,75 @@ import webview
 
 # Prevent ObjectDisposedException traceback upon native window close
 try:
+    import logging
+    class PywebviewDisposeFilter(logging.Filter):
+        def filter(self, record):
+            # Suppress ObjectDisposedException traceback when WebView2 is closing/disposed
+            if record.exc_info and "ObjectDisposedException" in str(record.exc_info[1]):
+                return False
+            msg = record.getMessage()
+            if "ObjectDisposedException" in msg or "disposed object" in msg.lower():
+                return False
+            return True
+
+    logging.getLogger("pywebview").addFilter(PywebviewDisposeFilter())
+
     from webview.platforms import edgechromium
-    _orig_evaluate_js = edgechromium.EdgeChrome.evaluate_js
-    def _safe_evaluate_js(self, script, semaphore=None):
-        if getattr(self, 'webview', None) is None or getattr(self.webview, 'IsDisposed', False):
-            if semaphore:
-                try:
-                    semaphore.release()
-                except Exception:
-                    pass
+    import json
+    from System.Threading import Semaphore
+    from System import Action, Func, Object, String, Type
+    from System.Threading.Tasks import Task
+
+    def _safe_evaluate_js(self, script: str, parse_json: bool = True):
+        wv = getattr(self, 'webview', None)
+        if wv is None:
             return None
         try:
-            return _orig_evaluate_js(self, script, semaphore)
+            if getattr(wv, 'IsDisposed', False) or getattr(wv, 'Disposing', False):
+                return None
+            if hasattr(wv, 'IsHandleCreated') and not wv.IsHandleCreated:
+                return None
         except Exception:
             return None
+
+        def _callback(res):
+            nonlocal result
+            if parse_json and res is not None:
+                try:
+                    result = json.loads(res)
+                except Exception:
+                    result = res
+            else:
+                result = res
+            try:
+                semaphore.release()
+            except Exception:
+                pass
+
+        result = None
+        semaphore = Semaphore(0)
+
+        try:
+            wv.Invoke(
+                Func[Object](
+                    lambda: wv.ExecuteScriptAsync(script).ContinueWith(
+                        Action[Task[String]](lambda task: _callback(json.loads(task.Result))),
+                        self.syncContextTaskScheduler,
+                    )
+                )
+            )
+            semaphore.acquire()
+        except Exception as e:
+            err_str = str(e)
+            if "ObjectDisposedException" not in err_str and "disposed" not in err_str.lower():
+                logging.getLogger('pywebview').warning(f"Script evaluation note: {e}")
+            try:
+                semaphore.release()
+            except Exception:
+                pass
+
+        return result
+
     edgechromium.EdgeChrome.evaluate_js = _safe_evaluate_js
 except Exception:
     pass
@@ -151,6 +206,33 @@ class DesktopApi:
                         scale = form.DeviceDpi / 96.0
                     phys_w = int(round(target_w * scale))
                     phys_h = int(round(target_h * scale))
+
+                    # Smart Positioning: automatically adjust position if expanding near screen boundaries
+                    try:
+                        screen = WinForms.Screen.FromControl(form)
+                        working_area = screen.WorkingArea
+                        margin = int(round(16 * scale))
+
+                        curr_x = form.Location.X
+                        curr_y = form.Location.Y
+                        new_x = curr_x
+                        new_y = curr_y
+
+                        if new_x + phys_w > working_area.Right - margin:
+                            new_x = working_area.Right - phys_w - margin
+                        if new_x < working_area.Left + margin:
+                            new_x = working_area.Left + margin
+
+                        if new_y + phys_h > working_area.Bottom - margin:
+                            new_y = working_area.Bottom - phys_h - margin
+                        if new_y < working_area.Top + margin:
+                            new_y = working_area.Top + margin
+
+                        if new_x != curr_x or new_y != curr_y:
+                            form.Location = Drawing.Point(new_x, new_y)
+                    except Exception:
+                        pass
+
                     form.Size = Drawing.Size(phys_w, phys_h)
 
                 if form.InvokeRequired:
@@ -199,6 +281,27 @@ class DesktopApi:
                         scale = form.DeviceDpi / 96.0
                     phys_x = int(round(target_x * scale))
                     phys_y = int(round(target_y * scale))
+
+                    # Smart Positioning: ensure position is clamped within screen working area
+                    try:
+                        screen = WinForms.Screen.FromPoint(Drawing.Point(phys_x, phys_y))
+                        working_area = screen.WorkingArea
+                        margin = int(round(16 * scale))
+                        phys_w = form.Size.Width
+                        phys_h = form.Size.Height
+
+                        if phys_x + phys_w > working_area.Right - margin:
+                            phys_x = working_area.Right - phys_w - margin
+                        if phys_x < working_area.Left + margin:
+                            phys_x = working_area.Left + margin
+
+                        if phys_y + phys_h > working_area.Bottom - margin:
+                            phys_y = working_area.Bottom - phys_h - margin
+                        if phys_y < working_area.Top + margin:
+                            phys_y = working_area.Top + margin
+                    except Exception:
+                        pass
+
                     form.Location = Drawing.Point(phys_x, phys_y)
 
                 if form.InvokeRequired:
@@ -328,6 +431,7 @@ class DesktopApi:
                         key = Drawing.Color.FromArgb(1, 1, 1)
                         form.BackColor = key
                         form.TransparencyKey = key
+                        enable_dwm_transparency(int(form.Handle.ToInt64()))
                     else:
                         form.TopMost = False
                         form.TransparencyKey = Drawing.Color.Empty
@@ -410,8 +514,16 @@ def main():
 
     window.events.shown += on_window_shown
 
+    def on_window_closed():
+        threading.Thread(target=lambda: (time.sleep(0.1), os._exit(0)), daemon=True).start()
+
+    window.events.closed += on_window_closed
+
     # 4. Start GUI event loop
-    webview.start(debug=False)
+    try:
+        webview.start(debug=False)
+    finally:
+        os._exit(0)
 
 if __name__ == "__main__":
     main()

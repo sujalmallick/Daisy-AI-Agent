@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "Daisy",
-        "width": 210,
-        "height": 210,
+        "width": 250,
+        "height": 260,
         "resizable": true,
         "transparent": true,
         "decorations": false,

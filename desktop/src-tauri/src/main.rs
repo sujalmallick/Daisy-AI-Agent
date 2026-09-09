@@ -5,6 +5,42 @@ use tauri::{LogicalSize, Manager, PhysicalPosition, Position};
 #[tauri::command]
 fn resize_window(app_handle: tauri::AppHandle, width: u32, height: u32) {
     if let Some(window) = app_handle.get_webview_window("main") {
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let scale_factor = monitor.scale_factor();
+            let monitor_size = monitor.size();
+            let monitor_pos = monitor.position();
+
+            let phys_w = (width as f64 * scale_factor).round() as i32;
+            let phys_h = (height as f64 * scale_factor).round() as i32;
+            let margin = (16.0 * scale_factor).round() as i32;
+
+            if let Ok(curr_pos) = window.outer_position() {
+                let mut new_x = curr_pos.x;
+                let mut new_y = curr_pos.y;
+
+                let max_x = monitor_pos.x + monitor_size.width as i32 - phys_w - margin;
+                let min_x = monitor_pos.x + margin;
+                let max_y = monitor_pos.y + monitor_size.height as i32 - phys_h - margin;
+                let min_y = monitor_pos.y + margin;
+
+                if new_x > max_x {
+                    new_x = max_x;
+                }
+                if new_x < min_x {
+                    new_x = min_x;
+                }
+                if new_y > max_y {
+                    new_y = max_y;
+                }
+                if new_y < min_y {
+                    new_y = min_y;
+                }
+
+                if new_x != curr_pos.x || new_y != curr_pos.y {
+                    let _ = window.set_position(Position::Physical(PhysicalPosition::new(new_x, new_y)));
+                }
+            }
+        }
         let _ = window.set_size(LogicalSize::new(width as f64, height as f64));
     }
 }
@@ -22,7 +58,29 @@ fn get_window_position(app_handle: tauri::AppHandle) -> Result<(i32, i32), Strin
 #[tauri::command]
 fn set_window_position(app_handle: tauri::AppHandle, x: i32, y: i32) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
-        let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
+        let mut target_x = x;
+        let mut target_y = y;
+
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let scale_factor = monitor.scale_factor();
+            let monitor_size = monitor.size();
+            let monitor_pos = monitor.position();
+            let margin = (16.0 * scale_factor).round() as i32;
+
+            if let Ok(size) = window.outer_size() {
+                let max_x = monitor_pos.x + monitor_size.width as i32 - size.width as i32 - margin;
+                let min_x = monitor_pos.x + margin;
+                let max_y = monitor_pos.y + monitor_size.height as i32 - size.height as i32 - margin;
+                let min_y = monitor_pos.y + margin;
+
+                if target_x > max_x { target_x = max_x; }
+                if target_x < min_x { target_x = min_x; }
+                if target_y > max_y { target_y = max_y; }
+                if target_y < min_y { target_y = min_y; }
+            }
+        }
+
+        let _ = window.set_position(Position::Physical(PhysicalPosition::new(target_x, target_y)));
         Ok(())
     } else {
         Err("Window not found".into())
