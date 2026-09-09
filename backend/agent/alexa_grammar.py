@@ -61,17 +61,33 @@ class AlexaIntentParser:
                 "tokens": 0
             }
 
-        # Self-Close / Exit Intent: "sayonara daisy", "go home daisy", "goodbye", "exit", etc.
+        # Self-Close / Direct Exit Intent: "sayonara daisy", "go home daisy", "goodbye", "shutdown daisy", etc.
         exit_phrases = [
             "sayonara", "sayonara daisy", "go home", "go home daisy",
             "goodbye", "goodbye daisy", "bye", "bye daisy", "bye bye",
-            "exit", "exit daisy", "quit", "quit daisy",
-            "close daisy", "close yourself", "close the app", "close app",
+            "exit daisy", "quit daisy",
             "shut down", "shutdown", "shutdown daisy", "shut down daisy",
             "turn off", "turn off daisy", "go to sleep", "sleep daisy"
         ]
-        if raw_clean in exit_phrases or any(raw_clean == f"{p} {cls.wake_word.lower()}" for p in ["sayonara", "go home", "goodbye", "bye", "exit", "quit", "close"]):
+        if raw_clean in exit_phrases or any(raw_clean == f"{p} {cls.wake_word.lower()}" for p in ["sayonara", "go home", "goodbye", "bye", "shutdown"]):
             return {"intent": "Daisy.ExitIntent", "action": "exit_app", "slots": {}, "tokens": 0}
+
+        # Confirmation intents for interactive questions (e.g., "Are you sure you want to close Chrome?")
+        yes_words = {
+            "yes", "yeah", "yep", "sure", "ok", "okay", "confirm", "do it",
+            "close it", "go ahead", "yup", "definitely", "absolutely", "please",
+            "yes please", "yes do it", "yes close it"
+        }
+        if raw_clean in yes_words or any(raw_clean == f"{w} {cls.wake_word.lower()}" for w in ["yes", "yeah", "sure"]):
+            return {"intent": "AMAZON.YesIntent", "action": "confirm_yes", "slots": {}, "tokens": 0}
+
+        no_words = {
+            "no", "nope", "nah", "cancel", "don't", "dont", "nevermind",
+            "never mind", "stop", "leave it", "keep it", "abort", "no thanks",
+            "don't close", "dont close", "no don't", "no dont"
+        }
+        if raw_clean in no_words or any(raw_clean == f"{w} {cls.wake_word.lower()}" for w in ["no", "nope", "nah"]):
+            return {"intent": "AMAZON.NoIntent", "action": "confirm_no", "slots": {}, "tokens": 0}
 
         # Local conversational intents (0 tokens, no API key required)
         if any(raw_clean == q or raw_clean.startswith(q) for q in ["who are you", "what is your name", "introduce yourself"]):
@@ -91,7 +107,7 @@ class AlexaIntentParser:
         if close_match:
             target = close_match.group(1).strip()
             if target in ["daisy", "yourself", "assistant", "app", "this app", "the app", "window"]:
-                return {"intent": "Daisy.ExitIntent", "action": "exit_app", "slots": {}, "tokens": 0}
+                return {"intent": "Daisy.AppCloseIntent", "action": "close_app", "slots": {"app_name": "Daisy"}, "tokens": 0}
             if target not in ["music", "song", "track", "playback", "playing"]:
                 return {
                     "intent": "Daisy.AppCloseIntent",

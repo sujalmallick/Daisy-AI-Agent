@@ -22,7 +22,8 @@ import {
   setWidgetOnTop,
   minimizeWindow,
   closeWindow,
-  setNativeWindowMode
+  setNativeWindowMode,
+  closeApp
 } from './utils/windowManager';
 import { ttsClient } from './utils/ttsClient';
 
@@ -246,7 +247,7 @@ export function App() {
    * Replaces the old window.speechSynthesis implementation.
    * Tracks speaking state for barge-in detection.
    */
-  const speakAloud = useCallback((text: string) => {
+  const speakAloud = useCallback((text: string, onFinish?: () => void) => {
     if (!text) return;
 
     // Stop any current speech before starting new one (no overlapping audio)
@@ -269,8 +270,9 @@ export function App() {
         isProcessingRef.current = false;
         setOrbState('idle');
 
-        // Resume ambient recognition after speaking ends
-        if (isAmbientRef.current) {
+        if (onFinish) {
+          onFinish();
+        } else if (isAmbientRef.current) {
           window.setTimeout(() => {
             try {
               recognitionRef.current?.start();
@@ -332,6 +334,35 @@ export function App() {
 
         if (res.ok) {
           const data = await res.json();
+
+          // Check if self-close / exit was triggered ("sayonara daisy", "go home daisy")
+          if (data.should_exit) {
+            setOrbState('speaking');
+            const farewell = data.spoken_reply || "Sayonara! Goodbye!";
+            showToast(farewell, 'Sayonara Daisy', 3000);
+            speakAloud(farewell);
+
+            // Allow farewell TTS to be spoken aloud before terminating window and backend
+            setTimeout(async () => {
+              await closeApp();
+            }, 2200);
+            return;
+          }
+
+          // Check if action requires interactive confirmation ("Are you sure you want to close Chrome?")
+          if (data.awaiting_confirmation) {
+            queueVoiceTimer(() => {
+              setOrbState('speaking');
+              const question = data.spoken_reply || "Are you sure?";
+              showToast(question, 'Confirmation Required', 3500);
+              speakAloud(question, () => {
+                // When Daisy finishes asking the question, open mic directly for "yes" or "no"
+                startListeningDirect();
+              });
+            }, 450);
+            return;
+          }
+
           setOrbState('executing');
           showToast(data.spoken_reply || `Executed: ${data.source}`, assistantNameRef.current, 2000);
 
@@ -814,9 +845,9 @@ export function App() {
               </div>
             </div>
 
-            {/* Bottom Spotify Indicator (Non-intrusive pill if music is playing) */}
+            {/* Bottom Spotify Indicator (Non-intrusive pill on bottom left if music is playing) */}
             {hasActiveTrack && (
-              <div className="absolute bottom-4 right-6 flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-black/70 border border-white/10 backdrop-blur-md text-xs text-zinc-300 shadow-lg animate-in fade-in duration-300">
+              <div className="absolute bottom-5 left-6 flex items-center gap-3 px-3.5 py-1.5 rounded-full bg-black/75 border border-white/10 backdrop-blur-md text-xs text-zinc-300 shadow-lg animate-in fade-in duration-300 z-20">
                 <Music className={`w-3.5 h-3.5 ${playback.isPlaying ? 'animate-pulse text-emerald-400' : 'text-zinc-400'}`} />
                 <span className="font-medium text-white max-w-[160px] truncate">{playback.trackTitle}</span>
                 <span className="text-zinc-500">•</span>
@@ -839,6 +870,32 @@ export function App() {
                 </div>
               </div>
             )}
+
+            {/* Circular Dot Floating Button (Switches into Floating Widget Overlay) */}
+            <button
+              onClick={() => setAppMode('floating')}
+              className="absolute bottom-5 right-6 z-30 group flex items-center gap-2 p-2 rounded-full bg-[#0d101a]/95 hover:bg-[#151b2c] border border-white/15 hover:border-emerald-500/50 shadow-[0_8px_25px_rgba(0,0,0,0.8)] hover:shadow-[0_0_20px_rgba(16,185,129,0.35)] transition-all duration-300 cursor-pointer hover:scale-105 active:scale-95"
+              title="Switch to Floating Desktop Overlay"
+            >
+              {/* Circular 3D Glowing Dot */}
+              <div className="relative w-6 h-6 rounded-full flex items-center justify-center">
+                <span className="absolute -inset-1 rounded-full bg-emerald-500/30 blur-sm group-hover:bg-emerald-400/50 animate-pulse pointer-events-none" />
+                <div
+                  className="relative w-5 h-5 rounded-full border border-emerald-300/50 shadow-inner flex items-center justify-center"
+                  style={{
+                    background: 'radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.95) 0%, rgba(16, 185, 129, 0.9) 35%, rgba(6, 78, 59, 0.95) 75%, #021a12 100%)',
+                    boxShadow: '0 0 10px rgba(16, 185, 129, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.8), inset 0 -2px 4px rgba(0, 0, 0, 0.8)'
+                  }}
+                >
+                  <div className="absolute top-0.5 left-1 w-2.5 h-1 rounded-full bg-white/70 blur-[0.3px] -rotate-30" />
+                </div>
+              </div>
+
+              {/* Smooth Expandable Text Label */}
+              <span className="max-w-0 overflow-hidden whitespace-nowrap text-xs font-semibold text-zinc-300 group-hover:max-w-xs group-hover:pr-2 transition-all duration-300 ease-in-out">
+                Floating Overlay
+              </span>
+            </button>
           </div>
         </div>
 

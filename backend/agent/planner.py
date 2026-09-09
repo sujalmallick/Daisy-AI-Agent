@@ -84,6 +84,8 @@ class DaisyAgenticPlanner:
                                 spoken_reply = f"Playing {track}." if not artist else f"Playing {track} by {artist}."
                             else:
                                 spoken_reply = f"Paused on {track}." if not artist else f"Paused on {track} by {artist}."
+                        elif res_data.get("status") == "awaiting_confirmation":
+                            spoken_reply = f"Are you sure you want to close {res_data.get('app_name', 'this app')}?"
                         elif res_data.get("status") == "exiting" or res_data.get("action") == "exit_app":
                             spoken_reply = "Sayonara! Goodbye!"
                         elif res_data.get("status") == "paused":
@@ -101,11 +103,16 @@ class DaisyAgenticPlanner:
                 isinstance(r.get("result"), dict) and (r.get("result", {}).get("should_exit") or r.get("result", {}).get("action") == "exit_app")
                 for r in results
             )
+            awaiting_confirmation = any(
+                isinstance(r.get("result"), dict) and r.get("result", {}).get("awaiting_confirmation")
+                for r in results
+            )
             return {
                 "source": "FASTPATH_LOCAL",
                 "tokens": 0,
                 "spoken_reply": spoken_reply,
                 "should_exit": should_exit,
+                "awaiting_confirmation": awaiting_confirmation,
                 "details": fast_result
             }
 

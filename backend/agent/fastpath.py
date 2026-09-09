@@ -7,10 +7,12 @@ logger = logging.getLogger("daisy.fastpath")
 
 class FastPathEngine:
     """
-    Frictionless Fast-Path Policy Engine:
-    Ensures simple music playback ("play Starboy", "pause") and direct Q&A
-    execute in < 1 second with ZERO deliberation or questionnaire overhead.
+    Evaluates pattern-matched utterances against MCP tools in <10ms.
+    Bypasses LLM planning entirely for deterministic, low-latency execution.
     """
+    pending_confirmation: Optional[Dict[str, Any]] = None
+    pending_timestamp: float = 0.0
+    CONFIRMATION_TIMEOUT_SECS: float = 30.0
 
     @classmethod
     def handle_quick_music(cls, prompt: str) -> Optional[Dict[str, Any]]:
@@ -18,6 +20,78 @@ class FastPathEngine:
         Attempts to resolve simple music commands immediately via MCP.
         Returns execution result or None if it requires complex reasoning.
         """
+        import time
+
+        # 0. Check if there is an active pending confirmation (e.g. "Are you sure you want to close Chrome?")
+        if (
+            cls.pending_confirmation is not None
+            and (time.time() - cls.pending_timestamp) < cls.CONFIRMATION_TIMEOUT_SECS
+        ):
+            parsed = AlexaIntentParser.parse(prompt)
+            if any(p.get("action") == "confirm_yes" for p in parsed):
+                pending = cls.pending_confirmation
+                cls.pending_confirmation = None
+                display = pending.get("display_name", "the app")
+
+                if pending.get("type") == "exit_app":
+                    return {
+                        "mode": "fastpath_confirmation",
+                        "tokens_consumed": 0,
+                        "latency_ms": 10,
+                        "actions_executed": 1,
+                        "results": [{
+                            "success": True,
+                            "tool": "system.exit_app",
+                            "result": {
+                                "status": "exiting",
+                                "action": "exit_app",
+                                "should_exit": True,
+                                "message": "Sayonara! Goodbye!"
+                            }
+                        }]
+                    }
+                else:
+                    # Execute confirmed app close
+                    res = mcp_manager.execute("app_launcher.close_app", {"app_name": pending["app_name"]})
+                    return {
+                        "mode": "fastpath_confirmation",
+                        "tokens_consumed": 0,
+                        "latency_ms": 10,
+                        "actions_executed": 1,
+                        "results": [{
+                            "success": True,
+                            "tool": "app_launcher.close_app",
+                            "result": {
+                                "status": "app_closed",
+                                "app": display,
+                                "message": f"Closed {display}."
+                            }
+                        }]
+                    }
+
+            elif any(p.get("action") == "confirm_no" for p in parsed):
+                pending = cls.pending_confirmation
+                cls.pending_confirmation = None
+                display = pending.get("display_name", "the app")
+                return {
+                    "mode": "fastpath_confirmation",
+                    "tokens_consumed": 0,
+                    "latency_ms": 10,
+                    "actions_executed": 1,
+                    "results": [{
+                        "success": True,
+                        "tool": "system.cancel",
+                        "result": {
+                            "status": "cancelled",
+                            "action": "cancel",
+                            "message": f"Okay, keeping {display} open."
+                        }
+                    }]
+                }
+            else:
+                # User asked something else — clear pending confirmation and proceed
+                cls.pending_confirmation = None
+
         # Check custom tool trigger phrases first (0 tokens)
         from backend.mcp.custom_loader import custom_tool_manager
         custom_match = custom_tool_manager.match_trigger(prompt)
@@ -94,8 +168,32 @@ class FastPathEngine:
                 results.append(mcp_manager.execute("app_launcher.launch_app", {"app_name": app_name}))
 
             elif action == "close_app":
-                app_name = slots.get("app_name", "")
-                results.append(mcp_manager.execute("app_launcher.close_app", {"app_name": app_name}))
+                app_name = slots.get("app_name", "").strip()
+                from backend.mcp.servers.app_launcher.server import app_launcher_server
+                norm = app_name.lower()
+                display_name = app_launcher_server.KNOWN_APPS.get(norm, (None, app_name.title()))[1]
+                if norm in ["daisy", "this app", "the app", "yourself", "assistant"]:
+                    display_name = "Daisy"
+
+                # Store pending confirmation
+                cls.pending_confirmation = {
+                    "type": "exit_app" if norm in ["daisy", "this app", "the app", "yourself", "assistant"] else "close_app",
+                    "app_name": app_name,
+                    "display_name": display_name
+                }
+                cls.pending_timestamp = time.time()
+
+                results.append({
+                    "success": True,
+                    "tool": "system.ask_confirmation",
+                    "result": {
+                        "status": "awaiting_confirmation",
+                        "action": "confirm_close_app",
+                        "app_name": display_name,
+                        "awaiting_confirmation": True,
+                        "message": f"Are you sure you want to close {display_name}?"
+                    }
+                })
 
             elif action == "exit_app":
                 results.append({
