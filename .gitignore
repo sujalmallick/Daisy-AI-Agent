@@ -1,4 +1,35 @@
+# Environment variables & secrets
 .env
+.env.*
+!.env.example
+
+# Token Caches (Spotify / Spotipy)
+.cache
+.cache*
+*.cache
+.spotipy*
+
+# Python
 venv/
+env/
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Node & Desktop frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Tauri & Rust build artifacts
+desktop/src-tauri/target/
+src-tauri/target/
+
+# Audio outputs & logs
+*.mp3
+*.wav
+*.log
