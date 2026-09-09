@@ -37,7 +37,7 @@ try:
 
     from webview.platforms import edgechromium
     import json
-    from System.Threading import Semaphore
+    from threading import Semaphore
     from System import Action, Func, Object, String, Type
     from System.Threading.Tasks import Task
 
