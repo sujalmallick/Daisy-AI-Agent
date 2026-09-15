@@ -15,6 +15,7 @@ import { NowPlayingCard, type PlaybackState } from './components/NowPlayingCard'
 import { SettingsModal } from './components/SettingsModal';
 import { DashboardView } from './components/DashboardView';
 import { ToastGlider } from './components/ToastGlider';
+import { ConversationCard, type ConversationCardData } from './components/ConversationCard';
 import { 
   resizeWidget, 
   restoreWidgetPosition, 
@@ -72,6 +73,9 @@ export function App() {
     repeatState: 'off',
   });
   const [isPlaybackLoading, setIsPlaybackLoading] = useState<boolean>(false);
+  const [activeCard, setActiveCard] = useState<ConversationCardData | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_conversationHistory, setConversationHistory] = useState<ConversationCardData[]>([]);
 
   // Derive if music is actively present
   const hasActiveTrack = Boolean(
@@ -407,6 +411,22 @@ export function App() {
 
         if (res.ok) {
           const data = await res.json();
+
+          // Build a conversation card from every response
+          if (data.display_text || data.spoken_reply) {
+            const newCard: ConversationCardData = {
+              id: Date.now().toString(),
+              prompt: cmd,
+              source: data.source,
+              spokenReply: data.spoken_reply,
+              displayText: data.display_text || data.spoken_reply,
+              cardType: data.card_type || 'answer',
+              cardData: data.card_data,
+              timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            };
+            setActiveCard(newCard);
+            setConversationHistory(prev => [newCard, ...prev].slice(0, 20));
+          }
 
           // Check if self-close / exit was triggered ("sayonara daisy", "go home daisy")
           if (data.should_exit) {
@@ -985,6 +1005,17 @@ export function App() {
                 </p>
               </div>
 
+              {/* Active Conversation Card */}
+              {activeCard && (
+                <div className="w-full max-w-[620px] mb-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <ConversationCard
+                    card={activeCard}
+                    onDismiss={() => setActiveCard(null)}
+                    onSpeak={(text) => speakAloud(text)}
+                  />
+                </div>
+              )}
+
               {/* Command Input Bar */}
               <div className="w-full max-w-[620px] bg-[#0c0e16]/95 border border-white/10 rounded-full p-1.5 pl-3.5 flex items-center gap-2 shadow-2xl backdrop-blur-xl focus-within:border-emerald-500/50 transition-all">
                 <button
@@ -1217,6 +1248,18 @@ export function App() {
           </div>
         )}
       </div>
+
+      {/* Compact Conversation Card (floating mode) */}
+      {activeCard && (
+        <div className="mt-2 w-full max-w-[380px] animate-in fade-in slide-in-from-bottom-1 duration-200">
+          <ConversationCard
+            card={activeCard}
+            onDismiss={() => setActiveCard(null)}
+            onSpeak={(text) => speakAloud(text)}
+            compact={true}
+          />
+        </div>
+      )}
 
       {/* Popover Quick Text Command Bar (Centered neatly at bottom of orb) */}
       {showQuickInput && (
