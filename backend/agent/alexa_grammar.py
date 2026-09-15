@@ -1,3 +1,4 @@
+import os
 import re
 from typing import Optional, Dict, Any, List
 
@@ -8,7 +9,7 @@ class AlexaIntentParser:
     Handles multi-intent conjunction splitting ("and", "then").
     """
 
-    wake_word: str = "daisy"
+    wake_word: str = os.getenv("DAISY_WAKE_WORD", "daisy")
 
     @classmethod
     def set_wake_word(cls, name: str):
@@ -16,13 +17,13 @@ class AlexaIntentParser:
             cls.wake_word = name.strip()
 
     PATTERNS = [
-        ("AMAZON.PauseIntent", re.compile(r"^(pause|stop|halt|hold up|quiet|shut up)$", re.IGNORECASE)),
-        ("AMAZON.ResumeIntent", re.compile(r"^(resume|continue|unpause|keep playing|start playing)$", re.IGNORECASE)),
-        ("AMAZON.NextIntent", re.compile(r"^(next|skip|forward|next song|next track|skip song|skip track|play next|play next song|play next track|change song|change track)$", re.IGNORECASE)),
-        ("AMAZON.PreviousIntent", re.compile(r"^(previous|prev|back|last song|last track|go back|previous song|previous track|play previous|play previous song|play previous track)$", re.IGNORECASE)),
-        ("AMAZON.VolumeIntent", re.compile(r"^(volume\s+(up|down|\d+)|turn\s+it\s+(up|down)|set\s+volume\s+to\s+(\d+)|mute)$", re.IGNORECASE)),
-        ("AMAZON.ShuffleIntent", re.compile(r"^(shuffle\s+(on|off)|toggle\s+shuffle|shuffle)$", re.IGNORECASE)),
-        ("AMAZON.RepeatIntent", re.compile(r"^(repeat\s+(on|off|track)|toggle\s+repeat|loop\s+this)$", re.IGNORECASE)),
+        ("AMAZON.PauseIntent", re.compile(r"^(pause|stop|halt|hold\s+up|quiet|shut\s+up|hush|be\s+quiet|(?:pause|stop)(?:\s+the)?(?:\s+music|\s+song|\s+playback|\s+track)?)$", re.IGNORECASE)),
+        ("AMAZON.ResumeIntent", re.compile(r"^(resume|continue|unpause|keep\s+playing|start\s+playing|(?:resume|continue|unpause|start|play)(?:\s+the)?(?:\s+music|\s+song|\s+playback|\s+track)?)$", re.IGNORECASE)),
+        ("AMAZON.NextIntent", re.compile(r"^(next|skip|forward|(?:play\s+)?next(?:\s+song|\s+track)?|skip(?:\s+this)?(?:\s+song|\s+track)?|change(?:\s+the)?(?:\s+song|\s+track))$", re.IGNORECASE)),
+        ("AMAZON.PreviousIntent", re.compile(r"^(previous|prev|back|go\s+back|(?:play\s+)?previous(?:\s+song|\s+track)?|(?:play\s+)?last(?:\s+song|\s+track)?)$", re.IGNORECASE)),
+        ("AMAZON.VolumeIntent", re.compile(r"^(volume\s+(?:up|down|\d+)|turn\s+it\s+(?:up|down)|turn\s+up\s+the\s+volume|turn\s+down\s+the\s+volume|set\s+volume\s+to\s+(\d+)|mute|unmute|louder|make\s+it\s+louder|quieter|make\s+it\s+quieter)$", re.IGNORECASE)),
+        ("AMAZON.ShuffleIntent", re.compile(r"^(shuffle\s+(?:on|off)|toggle\s+shuffle|shuffle)$", re.IGNORECASE)),
+        ("AMAZON.RepeatIntent", re.compile(r"^(repeat\s+(?:on|off|track)|toggle\s+repeat|loop\s+this)$", re.IGNORECASE)),
         ("AMAZON.GetPlaybackInfoIntent", re.compile(r"^(what('s|\s+is)\s+playing|what\s+song\s+is\s+this|current\s+song|who\s+sings\s+this)$", re.IGNORECASE)),
         # Direct slot-based PlayMusicIntent: "play <song> [by <artist>]"
         ("PlayMusicIntent", re.compile(r"^play\s+(.+)$", re.IGNORECASE)),
@@ -35,6 +36,10 @@ class AlexaIntentParser:
         wakes = list(set([re.escape(cls.wake_word.lower()), "daisy"]))
         pattern = rf"^(?:hey\s+|ok\s+|hi\s+|hello\s+)?(?:{'|'.join(wakes)})\s*[,:\s]*"
         clean = re.sub(pattern, "", clean, flags=re.IGNORECASE).strip()
+        # Strip leading courtesies e.g. "can you", "could you", "would you", "please"
+        clean = re.sub(r"^(?:can\s+you\s+|could\s+you\s+|would\s+you\s+|please\s+)", "", clean, flags=re.IGNORECASE).strip()
+        # Strip trailing courtesies e.g. "please", "thanks", "thank you"
+        clean = re.sub(r"(?:\s+please|\s+thanks|\s+thank\s+you)$", "", clean, flags=re.IGNORECASE).strip()
         return clean.strip("?!.,;\"'")
 
     @classmethod
@@ -76,17 +81,19 @@ class AlexaIntentParser:
         yes_words = {
             "yes", "yeah", "yep", "sure", "ok", "okay", "confirm", "do it",
             "close it", "go ahead", "yup", "definitely", "absolutely", "please",
-            "yes please", "yes do it", "yes close it"
+            "yes please", "yes do it", "yes close it", "proceed", "sounds good",
+            "affirmative", "positive", "approve", "approved"
         }
-        if raw_clean in yes_words or any(raw_clean == f"{w} {cls.wake_word.lower()}" for w in ["yes", "yeah", "sure"]):
+        if raw_clean in yes_words or any(raw_clean == f"{w} {cls.wake_word.lower()}" for w in ["yes", "yeah", "sure", "approve"]):
             return {"intent": "AMAZON.YesIntent", "action": "confirm_yes", "slots": {}, "tokens": 0}
 
         no_words = {
-            "no", "nope", "nah", "cancel", "don't", "dont", "nevermind",
-            "never mind", "stop", "leave it", "keep it", "abort", "no thanks",
-            "don't close", "dont close", "no don't", "no dont"
+            "no", "nope", "nah", "cancel", "cancel it", "cancel that", "don't", "dont", "nevermind",
+            "never mind", "stop", "leave it", "keep it", "abort", "abort it", "no thanks",
+            "don't close", "dont close", "no don't", "no dont", "negative",
+            "skip", "skip it", "reject", "deny", "don't do it", "dont do it"
         }
-        if raw_clean in no_words or any(raw_clean == f"{w} {cls.wake_word.lower()}" for w in ["no", "nope", "nah"]):
+        if raw_clean in no_words or any(raw_clean == f"{w} {cls.wake_word.lower()}" for w in ["no", "nope", "nah", "cancel", "deny"]):
             return {"intent": "AMAZON.NoIntent", "action": "confirm_no", "slots": {}, "tokens": 0}
 
         # Local conversational intents (0 tokens, no API key required)
@@ -106,9 +113,10 @@ class AlexaIntentParser:
         close_match = re.match(r"^(?:close|quit|exit|kill|terminate|stop)\s+(?:app\s+)?(.+)$", clean_lower, re.IGNORECASE)
         if close_match:
             target = close_match.group(1).strip()
+            clean_target = re.sub(r"^(?:the\s+|this\s+)", "", target).strip()
             if target in ["daisy", "yourself", "assistant", "app", "this app", "the app", "window"]:
                 return {"intent": "Daisy.AppCloseIntent", "action": "close_app", "slots": {"app_name": "Daisy"}, "tokens": 0}
-            if target not in ["music", "song", "track", "playback", "playing"]:
+            elif clean_target not in ["music", "song", "track", "playback", "playing"]:
                 return {
                     "intent": "Daisy.AppCloseIntent",
                     "action": "close_app",
@@ -128,6 +136,40 @@ class AlexaIntentParser:
                     "tokens": 0
                 }
 
+        # Document Query Intent: "what does my resume say about Python", "search notes for project deadlines"
+        rag_query_match = re.match(
+            r"^(?:what\s+does\s+(?:the\s+|my\s+)?(.+?)\s+say\s+about\s+(.+)|(?:search|find\s+in|check)\s+(?:the\s+|my\s+)?(.+?)\s+(?:for|about)\s+(.+)|ask\s+(?:the\s+|my\s+)?(.+?)\s+(?:about\s+)?(.+))$",
+            clean_lower,
+            re.IGNORECASE
+        )
+        if rag_query_match:
+            g = rag_query_match.groups()
+            doc = g[0] or g[2] or g[4]
+            q = g[1] or g[3] or g[5]
+            if doc and q:
+                return {
+                    "intent": "Daisy.DocumentQueryIntent",
+                    "action": "query_document",
+                    "slots": {"doc_name": doc.strip(), "query": q.strip()},
+                    "tokens": 0
+                }
+
+        # Document Summarize Intent: "summarize notes.txt on my desktop", "read my resume"
+        rag_sum_match = re.match(
+            r"^(?:summarize|give\s+me\s+a\s+summary\s+of|read)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:on\s+|from\s+)(?:my\s+)?(?:desktop|documents|downloads))?$",
+            clean_lower,
+            re.IGNORECASE
+        )
+        if rag_sum_match:
+            doc = rag_sum_match.group(1).strip()
+            if doc and doc not in ["music", "song", "track", "playback"]:
+                return {
+                    "intent": "Daisy.DocumentSummarizeIntent",
+                    "action": "summarize_document",
+                    "slots": {"doc_name": doc},
+                    "tokens": 0
+                }
+
         for intent_name, regex in cls.PATTERNS:
             match = regex.match(clean)
             if not match:
@@ -135,15 +177,17 @@ class AlexaIntentParser:
 
             # Handle volume slots
             if intent_name == "AMAZON.VolumeIntent":
-                full = match.group(1).lower()
+                full = match.group(0).lower()
                 num_match = re.search(r"\d+", full)
                 if num_match:
                     level = int(num_match.group(0))
                     return {"intent": intent_name, "action": "set_volume", "slots": {"level": level}, "tokens": 0}
-                elif "up" in full:
+                elif any(w in full for w in ["up", "louder"]):
                     return {"intent": intent_name, "action": "volume_up", "slots": {"delta": 10}, "tokens": 0}
-                elif "down" in full:
+                elif any(w in full for w in ["down", "quieter"]):
                     return {"intent": intent_name, "action": "volume_down", "slots": {"delta": -10}, "tokens": 0}
+                elif "unmute" in full:
+                    return {"intent": intent_name, "action": "set_volume", "slots": {"level": 70}, "tokens": 0}
                 elif "mute" in full:
                     return {"intent": intent_name, "action": "set_volume", "slots": {"level": 0}, "tokens": 0}
 
@@ -175,6 +219,14 @@ class AlexaIntentParser:
                     "slots": {"query": query},
                     "tokens": 0
                 }
+
+            if intent_name == "AMAZON.ShuffleIntent":
+                state = match.group(1).lower() if match.lastindex else "toggle"
+                return {"intent": intent_name, "action": "toggle_shuffle", "slots": {"state": state}, "tokens": 0}
+
+            if intent_name == "AMAZON.RepeatIntent":
+                state = match.group(1).lower() if match.lastindex else "toggle"
+                return {"intent": intent_name, "action": "toggle_repeat", "slots": {"state": state}, "tokens": 0}
 
             # Standard transport intents
             action_map = {

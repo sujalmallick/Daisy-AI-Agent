@@ -23,7 +23,8 @@ import {
   minimizeWindow,
   closeWindow,
   setNativeWindowMode,
-  closeApp
+  closeApp,
+  startDragWindow,
 } from './utils/windowManager';
 import { ttsClient } from './utils/ttsClient';
 
@@ -85,7 +86,48 @@ export function App() {
   const isSpeakingRef = useRef<boolean>(false);
   const isProcessingRef = useRef<boolean>(false);
   const isDirectListeningRef = useRef<boolean>(false);
+  const directListeningTimeoutRef = useRef<number | null>(null);
+  const autoNextTriggeredRef = useRef<number>(0);
   const volumeDebounceRef = useRef<number | null>(null);
+  const playbackRef = useRef<PlaybackState>(playback);
+  useEffect(() => {
+    playbackRef.current = playback;
+  }, [playback]);
+
+  const isDuckedRef = useRef<boolean>(false);
+
+  const duckPlayback = useCallback(async (percent: number = 18) => {
+    if (isDuckedRef.current) return;
+    isDuckedRef.current = true;
+    try {
+      await fetch('http://127.0.0.1:8000/playback/duck', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ percent }),
+      });
+    } catch (e) {
+      console.debug('Duck notice:', e);
+    }
+  }, []);
+
+  const unduckPlayback = useCallback(async () => {
+    if (!isDuckedRef.current) return;
+    isDuckedRef.current = false;
+    try {
+      await fetch('http://127.0.0.1:8000/playback/unduck', {
+        method: 'POST',
+      });
+    } catch (e) {
+      console.debug('Unduck notice:', e);
+    }
+  }, []);
+
+  const cancelDirectListeningTimeout = useCallback(() => {
+    if (directListeningTimeoutRef.current !== null) {
+      window.clearTimeout(directListeningTimeoutRef.current);
+      directListeningTimeoutRef.current = null;
+    }
+  }, []);
 
   /**
    * Barge-In refs:
@@ -94,6 +136,7 @@ export function App() {
    */
   const bargeInGraceRef = useRef<number>(0);
   const bargeInActiveRef = useRef<boolean>(false);
+  const startListeningDirectRef = useRef<() => void>(() => {});
 
 
 
@@ -148,6 +191,32 @@ export function App() {
   // Restore saved window position on startup
   useEffect(() => {
     restoreWidgetPosition();
+
+    // Initialize WebRTC hardware Acoustic Echo Cancellation (AEC) and Noise Suppression
+    // This primes Windows WASAPI & Chromium audio to cancel speaker feedback during playback
+    let aecStream: MediaStream | null = null;
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices
+        .getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        })
+        .then((stream) => {
+          aecStream = stream;
+        })
+        .catch((e) => {
+          console.debug('AEC initialization note:', e);
+        });
+    }
+
+    return () => {
+      if (aecStream) {
+        aecStream.getTracks().forEach((track) => track.stop());
+      }
+    };
   }, []);
 
   // Persist app mode and sync native window mode
@@ -270,6 +339,7 @@ export function App() {
         bargeInActiveRef.current = false;
         isProcessingRef.current = false;
         setOrbState('idle');
+        unduckPlayback();
 
         if (onFinish) {
           onFinish();
@@ -286,9 +356,10 @@ export function App() {
         bargeInActiveRef.current = false;
         isProcessingRef.current = false;
         setOrbState('idle');
+        unduckPlayback();
       },
     });
-  }, []);
+  }, [unduckPlayback]);
 
 
 
@@ -316,6 +387,7 @@ export function App() {
     clearVoiceTimers();
     isProcessingRef.current = true;
     setOrbState('listening');
+    duckPlayback();
     showToast(`"${cmd}"`, `Wake: ${assistantNameRef.current}`, 1600);
 
     queueVoiceTimer(async () => {
@@ -358,7 +430,7 @@ export function App() {
               showToast(question, 'Confirmation Required', 3500);
               speakAloud(question, () => {
                 // When Daisy finishes asking the question, open mic directly for "yes" or "no"
-                startListeningDirect();
+                startListeningDirectRef.current();
               });
             }, 450);
             return;
@@ -393,17 +465,32 @@ export function App() {
         }, 450);
       }, 450);
     }, 450);
-  }, [showToast, speakAloud, fetchLivePlayback, clearVoiceTimers, queueVoiceTimer]);
+  }, [showToast, speakAloud, fetchLivePlayback, clearVoiceTimers, queueVoiceTimer, duckPlayback]);
 
   const startListeningDirect = useCallback(() => {
+    cancelDirectListeningTimeout();
     isDirectListeningRef.current = true;
     setOrbState('listening');
-    showToast('Listening... Speak now', 'Microphone Active', 3500);
+    duckPlayback();
+    showToast('Listening... Speak now', 'Microphone Active', 3000);
 
     try {
       recognitionRef.current?.start();
     } catch {}
-  }, [showToast]);
+
+    // 6-second watchdog: automatically revert to idle if no speech is detected
+    directListeningTimeoutRef.current = window.setTimeout(() => {
+      if (isDirectListeningRef.current) {
+        isDirectListeningRef.current = false;
+        setOrbState('idle');
+        unduckPlayback();
+      }
+    }, 6000);
+  }, [showToast, cancelDirectListeningTimeout, duckPlayback, unduckPlayback]);
+
+  useEffect(() => {
+    startListeningDirectRef.current = startListeningDirect;
+  }, [startListeningDirect]);
 
   // Speech Recognition — Ambient Wake-Word, Direct Mic, and Alexa-Style Barge-In
   useEffect(() => {
@@ -452,6 +539,13 @@ export function App() {
 
         const lower = transcript.toLowerCase();
         const customWake = (assistantNameRef.current || 'Daisy').toLowerCase();
+        const escapedWake = customWake.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const wakeWordPattern = new RegExp(`\\b(hey\\s+|hi\\s+|ok\\s+|okay\\s+)?(${escapedWake}|daisy|daysi|desi)\\b`, 'i');
+        const hasWakeWord = wakeWordPattern.test(lower);
+
+        const isMusicActive = Boolean(playbackRef.current?.isPlaying);
+        const directMusicRegex = /\b(pause|stop|resume|unpause|next(\s+song|\s+track)?|skip(\s+this)?(\s+song|\s+track)?|previous|louder|quieter|turn\s+it\s+(up|down)|turn\s+(up|down)\s+the\s+volume|mute|unmute)\b/i;
+        const isDirectMusicCommand = isMusicActive && directMusicRegex.test(lower);
 
         // ── BARGE-IN PATH ─────────────────────────────────────────────────────
         // If Daisy is speaking and we hear something, check if it's a real
@@ -480,12 +574,12 @@ export function App() {
 
             // Transition: speaking → listening
             setOrbState('listening');
+            duckPlayback();
             showToast('Interrupted', assistantNameRef.current, 1200);
 
             // Process the barge-in command
-            const hasWakeWord = lower.includes(customWake) || lower.includes('daisy');
             const isDirect = isDirectListeningRef.current;
-            if (hasWakeWord || isDirect) {
+            if (hasWakeWord || isDirect || isDirectMusicCommand) {
               isDirectListeningRef.current = false;
               runVoiceFlow(transcript, "I'm here! How can I help you?");
             } else if (transcript.length > 2) {
@@ -496,30 +590,65 @@ export function App() {
           return; // Don't process further while speaking
         }
 
-        // ── NORMAL PATH ───────────────────────────────────────────────────────
-        // Standard wake-word or direct listening mode (not speaking)
-        if (!isFinal) return; // Only act on final results in normal mode
+        // ── INTERIM RESULT PATH (SMART DUCKING) ─────────────────────────────────
+        if (!isFinal) {
+          // If wake word or direct music command detected early in interim speech:
+          if (hasWakeWord || isDirectMusicCommand || isDirectListeningRef.current) {
+            duckPlayback();
+            setOrbState('listening');
+          }
+          return;
+        }
+
+        // ── NORMAL PATH (FINAL RESULT) ─────────────────────────────────────────
         if (isProcessingRef.current) return;
+        if (transcript.length < 2) return;
 
         console.log(`[${assistantNameRef.current} Voice Input]:`, transcript);
-        const hasWakeWord = lower.includes(customWake) || lower.includes('daisy');
         const isDirect = isDirectListeningRef.current;
 
-        if (hasWakeWord || isDirect) {
+        if (hasWakeWord || isDirect || isDirectMusicCommand) {
+          cancelDirectListeningTimeout();
           isDirectListeningRef.current = false;
+          duckPlayback();
           runVoiceFlow(transcript, "I'm right here! How can I help you?");
         }
       };
 
+      rec.onspeechend = () => {
+        cancelDirectListeningTimeout();
+        if (isDirectListeningRef.current) {
+          window.setTimeout(() => {
+            if (isDirectListeningRef.current) {
+              isDirectListeningRef.current = false;
+              setOrbState('idle');
+              unduckPlayback();
+            }
+          }, 1200);
+        }
+      };
+
       rec.onerror = (e: any) => {
+        cancelDirectListeningTimeout();
         if (e.error === 'no-speech' || e.error === 'audio-capture') {
+          if (isDirectListeningRef.current) {
+            isDirectListeningRef.current = false;
+            setOrbState('idle');
+            unduckPlayback();
+          }
           return;
         }
         console.warn('SpeechRecognition warning:', e.error);
       };
 
       rec.onend = () => {
-        // Always restart recognition (needed for both ambient and barge-in modes)
+        if (isDirectListeningRef.current && !isAmbientRef.current) {
+          cancelDirectListeningTimeout();
+          isDirectListeningRef.current = false;
+          setOrbState('idle');
+          unduckPlayback();
+        }
+        // Always restart recognition if ambient listening is enabled
         if (!isExplicitlyUnmounted && isAmbientRef.current && !isProcessingRef.current) {
           window.setTimeout(() => {
             startRecognitionSafely();
@@ -540,7 +669,7 @@ export function App() {
         rec?.stop();
       } catch {}
     };
-  }, [isAmbientListening, runVoiceFlow, showToast]);
+  }, [isAmbientListening, runVoiceFlow, showToast, cancelDirectListeningTimeout, duckPlayback, unduckPlayback]);
 
 
 
@@ -556,9 +685,12 @@ export function App() {
           recognitionRef.current?.start();
         } catch {}
       } else {
+        cancelDirectListeningTimeout();
+        isDirectListeningRef.current = false;
+        setOrbState('idle');
         showToast('Ambient Wake: PAUSED', 'Microphone Muted', 2000);
         try {
-          recognitionRef.current?.stop();
+          recognitionRef.current?.abort();
         } catch {}
       }
       return next;
@@ -579,12 +711,17 @@ export function App() {
 
   // Poll Spotify playback: every 2.5s when active/expanded, every 5s when idle
   useEffect(() => {
-    fetchLivePlayback(false);
     const pollIntervalMs = hasActiveTrack || playerMode === 'expanded' ? 2500 : 5000;
+    const initialTimer = window.setTimeout(() => {
+      fetchLivePlayback(true);
+    }, 0);
     const interval = window.setInterval(() => {
       fetchLivePlayback(true);
     }, pollIntervalMs);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+    };
   }, [hasActiveTrack, playerMode, fetchLivePlayback]);
 
   // Smooth local progress incrementer
@@ -599,7 +736,7 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [playback.isPlaying, playback.durationMs]);
 
-  const executeAction = async (action: string, value?: any, label?: string) => {
+  const executeAction = useCallback(async (action: string, value?: any, label?: string) => {
     try {
       let res = await fetch('http://127.0.0.1:8000/playback/action', {
         method: 'POST',
@@ -627,7 +764,7 @@ export function App() {
     } catch (err) {
       console.warn(`Action '${action}' failed:`, err);
     }
-  };
+  }, [showToast, fetchLivePlayback]);
 
   const togglePlay = () => {
     const nextState = !playback.isPlaying;
@@ -641,6 +778,14 @@ export function App() {
 
   const handlePrev = () => {
     executeAction('previous', null, 'Returning to Previous Track');
+  };
+
+  const handleShuffle = () => {
+    executeAction('shuffle', 'toggle', 'Shuffle Updated');
+  };
+
+  const handleRepeat = () => {
+    executeAction('repeat', 'toggle', 'Repeat Updated');
   };
 
   const handleVolumeChange = (newVal: number) => {
@@ -659,6 +804,34 @@ export function App() {
     showToast('Widget position reset', 'Window Manager');
   };
 
+  // Auto-play next song when current track finishes
+  useEffect(() => {
+    if (!playback.isPlaying || playback.durationMs <= 10000) return;
+    if (playback.progressMs >= playback.durationMs - 1500) {
+      const now = Date.now();
+      if (now - autoNextTriggeredRef.current > 7000) {
+        autoNextTriggeredRef.current = now;
+        console.log('[Auto-Play] Current song ended. Automatically playing next track...');
+        executeAction('next', null, 'Auto-playing Next Song');
+      }
+    }
+  }, [playback.isPlaying, playback.progressMs, playback.durationMs, executeAction]);
+
+  // Guaranteed cleanup & Spotify stop on window unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+          navigator.sendBeacon('http://127.0.0.1:8000/system/shutdown');
+        } else {
+          fetch('http://127.0.0.1:8000/system/shutdown', { method: 'POST', keepalive: true }).catch(() => {});
+        }
+      } catch {}
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   if (appMode === 'dashboard') {
     return (
       <div className="w-full h-full p-2 select-none overflow-hidden">
@@ -676,7 +849,14 @@ export function App() {
       <div className="w-full h-full p-2 select-none overflow-hidden bg-transparent">
         <div className="w-full h-full bg-[#090b11] border border-white/[0.08] rounded-2xl shadow-2xl flex flex-col overflow-hidden backdrop-blur-2xl">
           {/* Custom Draggable Window Titlebar */}
-          <div className="pywebview-drag-region flex items-center justify-between px-5 py-3 bg-transparent select-none">
+          <div
+            onPointerDown={(e) => {
+              if (e.button === 0 && (e.target as HTMLElement).closest('button') === null) {
+                startDragWindow();
+              }
+            }}
+            className="flex items-center justify-between px-5 py-3 bg-transparent select-none cursor-move"
+          >
             {/* Left: Subtle brand */}
             <div className="flex items-center gap-2 no-drag opacity-80 hover:opacity-100 transition">
               <span className="text-sm">🌼</span>
@@ -754,18 +934,34 @@ export function App() {
                 />
                 {hasActiveTrack && (
                   <div className="shrink-0 animate-in fade-in slide-in-from-left-3 duration-300">
-                    <CompactPlayer
-                      trackTitle={playback.trackTitle}
-                      trackArtist={playback.trackArtist}
-                      artworkUrl={playback.artworkUrl}
-                      isPlaying={playback.isPlaying}
-                      progressMs={playback.progressMs}
-                      durationMs={playback.durationMs}
-                      onTogglePlay={togglePlay}
-                      onNext={handleNext}
-                      onPrev={handlePrev}
-                      onExpand={() => {}}
-                    />
+                    {playerMode === 'expanded' ? (
+                      <NowPlayingCard
+                        playback={playback}
+                        onFoldBack={() => setPlayerMode('compact')}
+                        onToast={showToast}
+                        onTogglePlay={togglePlay}
+                        onNext={handleNext}
+                        onPrev={handlePrev}
+                        onToggleShuffle={handleShuffle}
+                        onToggleRepeat={handleRepeat}
+                        onVolumeChange={handleVolumeChange}
+                        onRefresh={() => fetchLivePlayback(false)}
+                        isLoading={isPlaybackLoading}
+                      />
+                    ) : (
+                      <CompactPlayer
+                        trackTitle={playback.trackTitle}
+                        trackArtist={playback.trackArtist}
+                        artworkUrl={playback.artworkUrl}
+                        isPlaying={playback.isPlaying}
+                        progressMs={playback.progressMs}
+                        durationMs={playback.durationMs}
+                        onTogglePlay={togglePlay}
+                        onNext={handleNext}
+                        onPrev={handlePrev}
+                        onExpand={() => setPlayerMode('expanded')}
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -917,20 +1113,20 @@ export function App() {
   const isExpanded = hasActiveTrack && !isPlayerTucked && playerMode === 'expanded';
 
   return (
-    <div className="relative w-full h-full select-none overflow-visible bg-transparent flex justify-start items-center">
+    <div className="no-drag-surface relative w-full h-full select-none overflow-visible bg-transparent flex justify-start items-start pt-7 pl-2.5">
       {/* Toast Notification Glider (Centered directly above the Orb anchor) */}
-      <div className="absolute top-2 left-[95px] -translate-x-1/2 z-40 pointer-events-none">
+      <div className="absolute top-1 left-[95px] -translate-x-1/2 z-40 pointer-events-none">
         <ToastGlider message={toastMsg} meta={toastMeta} visible={toastVisible} />
       </div>
 
       {/* Main Floating Assistant Cluster */}
       <div
-        className={`relative pl-5 flex ${
-          isExpanded ? 'items-start pt-[20px] gap-3.5' : 'items-center gap-3'
+        className={`relative p-0 flex ${
+          isExpanded ? 'items-start gap-3' : 'items-center gap-3'
         }`}
       >
-        {/* Daisy Orb Anchor */}
-        <div className={isExpanded ? 'mt-[10px] shrink-0' : 'shrink-0'}>
+        {/* Daisy Orb Anchor (170x170) */}
+        <div className="shrink-0">
           <FloatingOrb
             orbState={orbState}
             theme={theme}
@@ -972,7 +1168,7 @@ export function App() {
               setUntuckDragOffset(0);
             }}
             onClick={() => setIsPlayerTucked(false)}
-            className="flex items-center justify-center -ml-2 self-center z-20 cursor-pointer group/pill select-none touch-none animate-in fade-in zoom-in-95 duration-200"
+            className="no-drag-surface flex items-center justify-center -ml-2 self-center z-20 cursor-pointer group/pill select-none touch-none animate-in fade-in zoom-in-95 duration-200"
             title="Swipe right or click to reveal music player"
             style={{
               transform: `translateX(${untuckDragOffset}px)`,
@@ -997,6 +1193,8 @@ export function App() {
                 onTogglePlay={togglePlay}
                 onNext={handleNext}
                 onPrev={handlePrev}
+                onToggleShuffle={handleShuffle}
+                onToggleRepeat={handleRepeat}
                 onVolumeChange={handleVolumeChange}
                 onRefresh={() => fetchLivePlayback(false)}
                 isLoading={isPlaybackLoading}
@@ -1022,7 +1220,7 @@ export function App() {
 
       {/* Popover Quick Text Command Bar (Centered neatly at bottom of orb) */}
       {showQuickInput && (
-        <div className="absolute bottom-2 left-[95px] -translate-x-1/2 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/95 backdrop-blur-xl border border-white/20 shadow-2xl w-[180px]">
+        <div className="no-drag-surface absolute bottom-2 left-[95px] -translate-x-1/2 z-30 flex items-center gap-1 px-2.5 py-1 rounded-full bg-black/95 backdrop-blur-xl border border-white/20 shadow-2xl w-[160px]">
           <input
             type="text"
             value={textCommand}

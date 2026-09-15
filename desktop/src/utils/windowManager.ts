@@ -6,12 +6,12 @@ export interface WidgetDimensions {
 }
 
 export const WIDGET_DIMENSIONS: Record<WidgetViewMode, WidgetDimensions> = {
-  window: { width: 940, height: 680 },
-  orb: { width: 250, height: 260 },
-  compact: { width: 620, height: 260 },
-  expanded: { width: 580, height: 520 },
-  settings: { width: 640, height: 500 },
-  dashboard: { width: 880, height: 660 },
+  window: { width: 960, height: 700 },
+  orb: { width: 190, height: 250 },
+  compact: { width: 520, height: 250 },
+  expanded: { width: 520, height: 620 },
+  settings: { width: 640, height: 520 },
+  dashboard: { width: 960, height: 700 },
 };
 
 /**
@@ -21,7 +21,7 @@ export function clampWidgetPositionToScreen(x: number, y: number, width: number,
   if (typeof window === 'undefined' || !window.screen) return { x, y };
   const availW = window.screen.availWidth || 1920;
   const availH = window.screen.availHeight || 1080;
-  const margin = 16;
+  const margin = 12;
   const clampedX = Math.max(margin, Math.min(x, availW - width - margin));
   const clampedY = Math.max(margin, Math.min(y, availH - height - margin));
   return { x: clampedX, y: clampedY };
@@ -36,35 +36,8 @@ export async function resizeWidget(mode: WidgetViewMode, customDimensions?: Widg
   const width = Math.round(dims.width);
   const height = Math.round(dims.height);
 
-  // Check and clamp saved position if expanding near screen edge
-  try {
-    const rawX = localStorage.getItem('daisy_widget_pos_x');
-    const rawY = localStorage.getItem('daisy_widget_pos_y');
-    if (rawX !== null && rawY !== null) {
-      const curX = parseInt(rawX, 10);
-      const curY = parseInt(rawY, 10);
-      if (!isNaN(curX) && !isNaN(curY)) {
-        const clamped = clampWidgetPositionToScreen(curX, curY, width, height);
-        if (clamped.x !== curX || clamped.y !== curY) {
-          saveWidgetPosition(clamped.x, clamped.y);
-          // 1. Tauri v2
-          if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-            try {
-              const { invoke } = await import('@tauri-apps/api/core');
-              await invoke('set_window_position', { x: clamped.x, y: clamped.y });
-            } catch {}
-          }
-          // 2. pywebview
-          const pywebview = (window as unknown as { pywebview?: { api?: { set_window_position?: (x: number, y: number) => Promise<unknown> } } }).pywebview;
-          if (pywebview?.api?.set_window_position) {
-            try {
-              await pywebview.api.set_window_position(clamped.x, clamped.y);
-            } catch {}
-          }
-        }
-      }
-    }
-  } catch {}
+  // In Tauri, native resize_window handles multi-monitor DPI scaling and work area clamping cleanly
+
 
   // 1. Tauri v2 invoke (only if running inside Tauri)
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
@@ -80,9 +53,12 @@ export async function resizeWidget(mode: WidgetViewMode, customDimensions?: Widg
   // 2. pywebview JS API (with retry if API is still binding)
   const applyPywebview = async (): Promise<boolean> => {
     try {
-      const pywebview = (window as unknown as { pywebview?: { api?: { resize_window?: (w: number, h: number) => Promise<unknown> } } }).pywebview;
+      const pywebview = (window as unknown as { pywebview?: { api?: { resize_window?: (w: number, h: number) => Promise<any> } } }).pywebview;
       if (pywebview?.api?.resize_window) {
-        await pywebview.api.resize_window(width, height);
+        const res = await pywebview.api.resize_window(width, height);
+        if (res && typeof res.x === 'number' && typeof res.y === 'number') {
+          saveWidgetPosition(res.x, res.y);
+        }
         return true;
       }
     } catch {}
@@ -203,6 +179,15 @@ export async function minimizeWindow(): Promise<void> {
  * Closes / terminates the native application window.
  */
 export async function closeWindow(): Promise<void> {
+  // Fire shutdown beacon to stop Spotify immediately
+  try {
+    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      navigator.sendBeacon('http://127.0.0.1:8000/system/shutdown');
+    } else {
+      fetch('http://127.0.0.1:8000/system/shutdown', { method: 'POST', keepalive: true }).catch(() => {});
+    }
+  } catch {}
+
   // 1. Tauri v2
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
     try {
@@ -225,7 +210,16 @@ export async function closeWindow(): Promise<void> {
  * Cleanly terminates Daisy window and background server.
  */
 export async function closeApp(): Promise<void> {
-  // 1. pywebview JS API
+  // 1. Immediately request backend shutdown to stop Spotify and TTS
+  try {
+    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      navigator.sendBeacon('http://127.0.0.1:8000/system/shutdown');
+    } else {
+      fetch('http://127.0.0.1:8000/system/shutdown', { method: 'POST', keepalive: true }).catch(() => {});
+    }
+  } catch {}
+
+  // 2. pywebview JS API
   try {
     const pywebview = (window as unknown as { pywebview?: { api?: { close_app?: () => Promise<unknown> } } }).pywebview;
     if (pywebview?.api?.close_app) {
@@ -234,7 +228,7 @@ export async function closeApp(): Promise<void> {
     }
   } catch {}
 
-  // 2. Tauri v2
+  // 3. Tauri v2
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -243,20 +237,72 @@ export async function closeApp(): Promise<void> {
     } catch {}
   }
 
-  // 3. Backend fallback
-  try {
-    await fetch('http://127.0.0.1:8000/system/exit', { method: 'POST' });
-  } catch {}
+  // 4. Fallback close window
+  await closeWindow();
 }
 
 /**
  * Switches native window between Full Window mode ('window') and Floating Widget mode ('floating').
  */
 export async function setNativeWindowMode(mode: 'window' | 'floating'): Promise<void> {
+  // 1. Tauri v2
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('set_window_mode', { mode });
+    } catch {}
+  }
+
+  // 2. pywebview JS API with retry
+  const applyMode = async (): Promise<boolean> => {
+    try {
+      const pywebview = (window as unknown as { pywebview?: { api?: { set_window_mode?: (m: string) => Promise<unknown> } } }).pywebview;
+      if (pywebview?.api?.set_window_mode) {
+        await pywebview.api.set_window_mode(mode);
+        return true;
+      }
+    } catch {}
+    return false;
+  };
+
+  if (await applyMode()) return;
+  for (const delay of [150, 350, 700]) {
+    setTimeout(applyMode, delay);
+  }
+}
+
+/**
+ * Initiates native OS window dragging (works seamlessly in Tauri v2 and pywebview).
+ */
+export async function startDragWindow(): Promise<void> {
+  // 1. Tauri v2
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    try {
+      const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      await getCurrentWebviewWindow().startDragging();
+      return;
+    } catch {}
+  }
+
+  // 2. pywebview
   try {
-    const pywebview = (window as unknown as { pywebview?: { api?: { set_window_mode?: (m: string) => Promise<unknown> } } }).pywebview;
-    if (pywebview?.api?.set_window_mode) {
-      await pywebview.api.set_window_mode(mode);
+    const pywebview = (window as unknown as { pywebview?: { api?: { drag_window?: () => Promise<unknown> } } }).pywebview;
+    if (pywebview?.api?.drag_window) {
+      await pywebview.api.drag_window();
+    }
+  } catch {}
+}
+
+/**
+ * Smoothly offsets window position by delta pixels (high-frequency fallback).
+ */
+export async function moveWindowBy(dx: number, dy: number): Promise<void> {
+  // 1. pywebview
+  try {
+    const pywebview = (window as unknown as { pywebview?: { api?: { move_window_by?: (dx: number, dy: number) => Promise<unknown> } } }).pywebview;
+    if (pywebview?.api?.move_window_by) {
+      await pywebview.api.move_window_by(dx, dy);
+      return;
     }
   } catch {}
 }

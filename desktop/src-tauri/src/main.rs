@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{LogicalSize, Manager, PhysicalPosition, Position};
+use tauri::{LogicalSize, Manager, PhysicalPosition, Position, window::Color};
 
 #[tauri::command]
 fn resize_window(app_handle: tauri::AppHandle, width: u32, height: u32) {
@@ -102,7 +102,29 @@ fn minimize_window(app_handle: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn set_window_mode(app_handle: tauri::AppHandle, mode: String) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        if mode == "floating" {
+            let _ = window.set_always_on_top(true);
+            let _ = window.set_shadow(false);
+            let _ = window.set_resizable(false);
+        } else {
+            let _ = window.set_always_on_top(false);
+            let _ = window.set_shadow(true);
+            let _ = window.set_resizable(true);
+        }
+    }
+}
+
+#[tauri::command]
 fn close_window(app_handle: tauri::AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.close();
+    }
+}
+
+#[tauri::command]
+fn exit_app(app_handle: tauri::AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.close();
     }
@@ -115,12 +137,14 @@ fn main() {
             get_window_position,
             set_window_position,
             set_always_on_top,
+            set_window_mode,
             minimize_window,
-            close_window
+            close_window,
+            exit_app
         ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
-                // Ensure frameless transparent floating orb window stays on top
+                let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
                 let _ = window.set_always_on_top(true);
             }
             Ok(())

@@ -162,9 +162,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setTimeout(() => setCopiedLogs(false), 2000);
   };
 
-  useEffect(() => {
+  const [prevAssistantName, setPrevAssistantName] = useState(assistantName);
+  if (assistantName !== prevAssistantName) {
+    setPrevAssistantName(assistantName);
     setTempName(assistantName);
-  }, [assistantName]);
+  }
 
   const handleSaveName = () => {
     const trimmed = tempName.trim();
@@ -264,11 +266,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    const initialTimer = window.setTimeout(() => {
       checkStatus();
-      const interval = setInterval(checkStatus, 3500);
-      return () => clearInterval(interval);
-    }
+    }, 0);
+    const interval = window.setInterval(checkStatus, 3500);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;

@@ -56,9 +56,8 @@ html, body, #root, body[data-theme] {
   user-select: none;
 }
 
-/* Tauri & Pywebview Drag Regions */
-[data-tauri-drag-region], .pywebview-drag-region {
-  -webkit-app-region: drag;
+.no-drag-surface {
+  -webkit-app-region: no-drag;
 }
 
 .no-drag, button, input, select, textarea, a {

@@ -128,11 +128,24 @@ class DaisyAgenticPlanner:
 
         try:
             from google.genai import types
+            from backend.hitl.manager import hitl_manager, RiskTier
 
             client = self._get_client()
             if not client:
                 raise RuntimeError("Gemini client not initialized")
-            tools_schema = mcp_manager.get_all_tools_schema()
+
+            # Dynamic tool pruning based on query intent to save prompt tokens
+            prompt_lower = user_prompt.lower()
+            domains = []
+            if any(w in prompt_lower for w in ["music", "song", "track", "play", "album", "artist", "spotify", "volume", "playlist", "vibe", "pause", "resume", "skip"]):
+                domains.append("media")
+            if any(w in prompt_lower for w in ["file", "document", "doc", "pdf", "notes", "read", "summarize", "search", "resume", "say about", "folder", "desktop"]):
+                domains.append("rag")
+                domains.append("desktop")
+            if any(w in prompt_lower for w in ["open", "launch", "close", "app", "chrome", "notepad", "code", "calc", "window"]):
+                domains.append("desktop")
+
+            tools_schema = mcp_manager.get_domain_tools_schema(domains if domains else None)
 
             # Build Gemini Function Declarations
             func_decls = []
@@ -172,66 +185,114 @@ class DaisyAgenticPlanner:
 
             system_instruction = (
                 "You are Daisy, a snappy desktop voice assistant. "
-                "You control Spotify, launch Windows apps, and use MCP tools. "
-                "CRITICAL: Your spoken reply must be ONE short sentence, under 15 words, "
-                "conversational and casual — like Alexa or Siri. "
-                "No markdown, no lists, no code, no URLs. "
-                "Examples: 'Sure, playing Starboy.' / 'Paused.' / 'Volume set to 60.' / "
-                "'Opening Chrome now.' / 'Got it, skipping ahead.' "
-                "Execute the right tool calls when needed."
+                "You control Spotify, query desktop documents via RAG, and launch Windows apps. "
+                "CRITICAL VOICE RULE: Your spoken reply must be ONE concise, natural sentence, under 15 words. "
+                "No markdown, no bullet lists, no URLs, no citations. "
+                "Examples: 'Playing Starboy on Spotify.' / 'Your notes say the deadline is Friday.' / "
+                "'Closed Chrome.' / 'Found 2 items in your downloads.' "
+                "Execute the appropriate MCP tool calls when required."
             )
 
-            # Generate content with MCP tool calling enabled
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    temperature=0.3,
-                    tools=gemini_tools
-                )
-            )
-
-            # Check if model requested tool calls
+            # Bounded ReAct Execution Loop (max 3 iterations)
+            MAX_REACT_STEPS = 3
             executed_tools = []
-            if hasattr(response, "function_calls") and response.function_calls:
-                for call in response.function_calls:
-                    call_name = call.name
-                    call_args = dict(call.args) if call.args else {}
-                    logger.info(f"Gemini planner executing tool: {call_name} with args {call_args}")
-                    exec_result = mcp_manager.execute(call_name, call_args)
-                    executed_tools.append({
-                        "name": call_name,
-                        "args": call_args,
-                        "result": exec_result
-                    })
-
-            # Formulate spoken reply — always normalized for voice output
             spoken_text = ""
-            if hasattr(response, "text") and response.text:
-                spoken_text = normalize_for_voice(response.text.strip())
-            elif executed_tools:
-                # Provide natural speech confirmation based on executed tool
-                first_exec = executed_tools[0]
-                tool_res = first_exec.get("result", {})
-                res_data = tool_res.get("result", {}) if isinstance(tool_res.get("result"), dict) else {}
-                if "track" in res_data and res_data.get("status") == "playing":
-                    track = res_data["track"]
-                    artist = res_data.get("artist", "")
-                    spoken_text = f"Sure, playing {track}." if not artist else f"Playing {track} by {artist}."
-                elif "message" in res_data:
-                    spoken_text = normalize_for_voice(res_data["message"])
-                elif "output" in res_data:
-                    spoken_text = normalize_for_voice(str(res_data["output"]))
+            contents = [types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])]
+
+            for step in range(MAX_REACT_STEPS):
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.3,
+                        max_output_tokens=80,
+                        tools=gemini_tools
+                    )
+                )
+
+                # Check if model called tools
+                if hasattr(response, "function_calls") and response.function_calls:
+                    # Append model's thought / tool invocation to conversation
+                    if response.candidates and response.candidates[0].content:
+                        contents.append(response.candidates[0].content)
+
+                    for call in response.function_calls:
+                        call_name = call.name
+                        call_args = dict(call.args) if call.args else {}
+
+                        # Human-In-The-Loop (HITL) Safety Gate
+                        risk = hitl_manager.evaluate_risk(call_name, call_args)
+                        if risk == RiskTier.DESTRUCTIVE:
+                            hitl_res = hitl_manager.request_confirmation(
+                                action_type=call_name,
+                                tool_name=call_name,
+                                args=call_args,
+                                prompt_message=f"I'm about to {call_name.replace('_', ' ')}. Should I go ahead?",
+                                display_name=call_name
+                            )
+                            return {
+                                "source": "HITL_GATE",
+                                "tokens": 0,
+                                "spoken_reply": hitl_res["prompt_message"],
+                                "awaiting_confirmation": True,
+                                "details": hitl_res
+                            }
+
+                        logger.info(f"ReAct step {step+1}: executing tool '{call_name}' with args {call_args}")
+                        exec_result = mcp_manager.execute(call_name, call_args)
+                        executed_tools.append({
+                            "name": call_name,
+                            "args": call_args,
+                            "result": exec_result
+                        })
+
+                        # Format observation (pruning length to save observation tokens)
+                        res_data = exec_result.get("result", exec_result)
+                        if isinstance(res_data, dict) and "context" in res_data:
+                            clean_obs = {
+                                "status": res_data.get("status", "success"),
+                                "file_name": res_data.get("file_name", ""),
+                                "context": str(res_data["context"])[:800]
+                            }
+                        elif isinstance(res_data, dict) and "message" in res_data:
+                            clean_obs = {"message": str(res_data["message"])}
+                        else:
+                            clean_obs = {"output": str(res_data)[:500]}
+
+                        resp_part = types.Part.from_function_response(
+                            name=call_name,
+                            response=clean_obs
+                        )
+                        contents.append(types.Content(role="user", parts=[resp_part]))
                 else:
-                    name = first_exec["name"].replace("_", " ")
-                    spoken_text = f"Done."
-            else:
-                spoken_text = "Done."
+                    # Model produced final spoken answer
+                    if hasattr(response, "text") and response.text:
+                        spoken_text = normalize_for_voice(response.text.strip())
+                    break
+
+            # Fallback formulation if model text was empty
+            if not spoken_text:
+                if executed_tools:
+                    first_exec = executed_tools[0]
+                    tool_res = first_exec.get("result", {})
+                    res_data = tool_res.get("result", {}) if isinstance(tool_res.get("result"), dict) else {}
+                    if "track" in res_data and res_data.get("status") == "playing":
+                        track = res_data["track"]
+                        artist = res_data.get("artist", "")
+                        spoken_text = f"Sure, playing {track}." if not artist else f"Playing {track} by {artist}."
+                    elif "message" in res_data:
+                        spoken_text = normalize_for_voice(res_data["message"])
+                    elif "context" in res_data and res_data.get("file_name"):
+                        spoken_text = f"Here is what I found in {res_data['file_name']}."
+                    else:
+                        spoken_text = "Done."
+                else:
+                    spoken_text = "Done."
 
             return {
                 "source": "GEMINI_AGENTIC",
-                "tokens": 120,
+                "tokens": 90,
                 "spoken_reply": spoken_text,
                 "details": {
                     "gemini_output": spoken_text,
@@ -239,9 +300,8 @@ class DaisyAgenticPlanner:
                 }
             }
 
-
         except Exception as e:
-            logger.error(f"Gemini planner error: {e}")
+            logger.error(f"Gemini planner error: {e}", exc_info=True)
             return {
                 "source": "ERROR",
                 "tokens": 0,

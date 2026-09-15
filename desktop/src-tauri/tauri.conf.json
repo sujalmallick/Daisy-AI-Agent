@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "identifier": "com.daisy.voiceassistant",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -14,8 +11,9 @@
       {
         "label": "main",
         "title": "Daisy",
-        "width": 250,
-        "height": 260,
+        "backgroundColor": "#00000000",
+        "width": 960,
+        "height": 700,
         "resizable": true,
         "transparent": true,
         "decorations": false,

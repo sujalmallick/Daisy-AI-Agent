@@ -230,14 +230,19 @@ class TTSManager:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 tmp_path = f.name
 
-            # PowerShell script: select voice explicitly and save to WAV file
+            # PowerShell script: select female voice explicitly and save to WAV file
             ps = (
-                f"Add-Type -AssemblyName System.Speech; "
-                f"$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-                f"$s.SelectVoice('{voice}'); "
+                "Add-Type -AssemblyName System.Speech; "
+                "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                f"$pref = '{voice}'; "
+                "$v = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Name -eq $pref -and $_.Enabled } | Select-Object -First 1; "
+                "if (-not $v) { "
+                "  $v = $s.GetInstalledVoices() | Where-Object { ($_.VoiceInfo.Gender -eq 'Female' -or $_.VoiceInfo.Name -match 'Zira|Jenny|Aria|Female|Eva|Hazel') -and $_.Enabled } | Select-Object -First 1 "
+                "}; "
+                "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
                 f"$s.SetOutputToWaveFile('{tmp_path}'); "
-                f"$s.Speak($input); "
-                f"$s.SetOutputToDefaultAudioDevice()"
+                "$s.Speak($input); "
+                "$s.SetOutputToDefaultAudioDevice()"
             )
             proc = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
@@ -358,10 +363,15 @@ class TTSManager:
         try:
             voice = self.windows_voice
             ps = (
-                f"Add-Type -AssemblyName System.Speech; "
-                f"$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-                f"$s.SelectVoice('{voice}'); "
-                f"$s.Speak($input)"
+                "Add-Type -AssemblyName System.Speech; "
+                "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                f"$pref = '{voice}'; "
+                "$v = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Name -eq $pref -and $_.Enabled } | Select-Object -First 1; "
+                "if (-not $v) { "
+                "  $v = $s.GetInstalledVoices() | Where-Object { ($_.VoiceInfo.Gender -eq 'Female' -or $_.VoiceInfo.Name -match 'Zira|Jenny|Aria|Female|Eva|Hazel') -and $_.Enabled } | Select-Object -First 1 "
+                "}; "
+                "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
+                "$s.Speak($input)"
             )
             proc = subprocess.Popen(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],

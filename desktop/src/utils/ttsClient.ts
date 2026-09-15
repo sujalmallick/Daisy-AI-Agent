@@ -24,8 +24,25 @@ class TTSClient {
   private currentObjectUrl: string | null = null;
   private abortController: AbortController | null = null;
   private _isSpeaking = false;
+  private cachedVoices: SpeechSynthesisVoice[] = [];
   /** Text currently being spoken — used by echo filter */
   public currentSpokenText = '';
+
+  constructor() {
+    this._initVoices();
+  }
+
+  private _initVoices(): void {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    const load = () => {
+      const v = window.speechSynthesis.getVoices();
+      if (v && v.length > 0) {
+        this.cachedVoices = v;
+      }
+    };
+    load();
+    window.speechSynthesis.onvoiceschanged = load;
+  }
 
   /** Returns true if audio is actively playing. */
   isSpeaking(): boolean {
@@ -175,6 +192,38 @@ class TTSClient {
     }
   }
 
+  private _getFemaleVoice(): SpeechSynthesisVoice | null {
+    const voices = this.cachedVoices.length > 0 ? this.cachedVoices : (typeof window !== 'undefined' && window.speechSynthesis ? window.speechSynthesis.getVoices() : []);
+    if (!voices || voices.length === 0) return null;
+
+    // Priority 1: explicitly known female voices in English
+    const female = voices.find(
+      (v) =>
+        v.lang.startsWith('en') &&
+        /(zira|jenny|aria|neerja|hazel|heera|susan|catherine|linda|eva|female|woman)/i.test(v.name)
+    );
+    if (female) return female;
+
+    // Priority 2: Natural or Google voices in English that are not explicitly male
+    const naturalFemale = voices.find(
+      (v) =>
+        v.lang.startsWith('en') &&
+        !/(david|mark|george|guy|male|man)/i.test(v.name) &&
+        /(natural|google|online)/i.test(v.name)
+    );
+    if (naturalFemale) return naturalFemale;
+
+    // Priority 3: any English voice that is NOT known male
+    const nonMale = voices.find(
+      (v) =>
+        v.lang.startsWith('en') &&
+        !/(david|mark|george|guy|male|man)/i.test(v.name)
+    );
+    if (nonMale) return nonMale;
+
+    return voices[0] || null;
+  }
+
   private _speakWebSpeech(text: string, options: PlayOptions): void {
     const { onStart, onEnd, onError } = options;
 
@@ -185,46 +234,63 @@ class TTSClient {
       return;
     }
 
-    try {
-      window.speechSynthesis.cancel();
-      const utt = new SpeechSynthesisUtterance(text);
-      utt.rate = 1.05;
-      utt.pitch = 1.02;
+    const doSpeak = () => {
+      try {
+        window.speechSynthesis.cancel();
+        const utt = new SpeechSynthesisUtterance(text);
+        // Tune pitch and rate to ensure a pleasant, feminine tone even on fallback voices
+        utt.rate = 1.04;
+        utt.pitch = 1.15;
 
-      // Pick best available English voice — prefer female/neural
-      const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(
-        (v) =>
-          v.lang.startsWith('en') &&
-          (v.name.includes('Natural') ||
-            v.name.includes('Jenny') ||
-            v.name.includes('Zira') ||
-            v.name.includes('Aria') ||
-            v.name.includes('Google') ||
-            v.name.includes('Female'))
-      ) ?? voices.find((v) => v.lang.startsWith('en'));
+        const voice = this._getFemaleVoice();
+        if (voice) {
+          utt.voice = voice;
+        }
 
-      if (preferred) utt.voice = preferred;
+        utt.onstart = () => onStart?.();
+        utt.onend = () => {
+          this._isSpeaking = false;
+          this.currentSpokenText = '';
+          onEnd?.();
+        };
+        utt.onerror = (e) => {
+          this._isSpeaking = false;
+          this.currentSpokenText = '';
+          onError?.(e);
+          onEnd?.();
+        };
 
-      utt.onstart = () => onStart?.();
-      utt.onend = () => {
-        this._isSpeaking = false;
-        this.currentSpokenText = '';
-        onEnd?.();
-      };
-      utt.onerror = (e) => {
+        window.speechSynthesis.speak(utt);
+      } catch (e) {
         this._isSpeaking = false;
         this.currentSpokenText = '';
         onError?.(e);
         onEnd?.();
-      };
+      }
+    };
 
-      window.speechSynthesis.speak(utt);
-    } catch (e) {
-      this._isSpeaking = false;
-      this.currentSpokenText = '';
-      onError?.(e);
-      onEnd?.();
+    // If voices aren't loaded yet in Chromium/WebView2, wait up to 300ms for onvoiceschanged
+    const currentVoices = this.cachedVoices.length > 0 ? this.cachedVoices : window.speechSynthesis.getVoices();
+    if (currentVoices.length === 0) {
+      let fired = false;
+      const onLoaded = () => {
+        if (fired) return;
+        fired = true;
+        this.cachedVoices = window.speechSynthesis.getVoices();
+        window.speechSynthesis.removeEventListener('voiceschanged', onLoaded);
+        doSpeak();
+      };
+      window.speechSynthesis.addEventListener('voiceschanged', onLoaded);
+      setTimeout(() => {
+        if (!fired) {
+          fired = true;
+          window.speechSynthesis.removeEventListener('voiceschanged', onLoaded);
+          this.cachedVoices = window.speechSynthesis.getVoices();
+          doSpeak();
+        }
+      }, 300);
+    } else {
+      doSpeak();
     }
   }
 

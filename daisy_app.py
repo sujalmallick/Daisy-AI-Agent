@@ -1,8 +1,16 @@
 import os
 import sys
 
-# Ensure WebView2 initializes with transparent default background
-os.environ["WEBVIEW2_DEFAULT_BACKGROUND_COLOR"] = "0"
+# Ensure WebView2 initializes with a transparent default background.
+# WebView2 expects an 8-digit AARRGGBB value; a bare "0" falls back to white.
+os.environ["WEBVIEW2_DEFAULT_BACKGROUND_COLOR"] = "00000000"
+
+# Apply Windows audio pipeline optimizations (disable ducking, configure WASAPI flags)
+try:
+    from backend.voice.audio_config import apply_windows_audio_optimizations
+    apply_windows_audio_optimizations()
+except Exception:
+    pass
 
 # Ensure UTF-8 output encoding on Windows consoles to prevent UnicodeEncodeError
 if hasattr(sys.stdout, 'reconfigure'):
@@ -11,6 +19,13 @@ if hasattr(sys.stdout, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8')
     except Exception:
         pass
+
+# Configure Windows Application Model ID so taskbar displays Daisy's distinct icon & identity
+try:
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("sujal.daisy.ai.assistant")
+except Exception:
+    pass
 
 import socket
 import subprocess
@@ -109,10 +124,27 @@ class MARGINS(ctypes.Structure):
 def enable_dwm_transparency(hwnd):
     try:
         dwm = ctypes.windll.dwmapi
+        dwm.DwmExtendFrameIntoClientArea.argtypes = [wintypes.HWND, ctypes.POINTER(MARGINS)]
+        dwm.DwmExtendFrameIntoClientArea.restype = ctypes.HRESULT
         margins = MARGINS(-1, -1, -1, -1)
-        dwm.DwmExtendFrameIntoClientArea(wintypes.HWND(hwnd), ctypes.byref(margins))
+        res = dwm.DwmExtendFrameIntoClientArea(wintypes.HWND(int(hwnd)), ctypes.byref(margins))
+        print(f"[Daisy] DWM transparency enabled (HWND {hwnd}): {res}")
     except Exception as e:
         print(f"[Daisy] DWM transparency note: {e}")
+
+def set_webview_transparent(control):
+    """Apply an alpha-zero background to the WebView2 controller when available."""
+    try:
+        import System.Drawing as Drawing
+        transparent = Drawing.Color.FromArgb(0, 255, 255, 255)
+        if hasattr(control, 'DefaultBackgroundColor'):
+            control.DefaultBackgroundColor = transparent
+        browser = getattr(control, 'webview', control)
+        controller = getattr(browser, 'CoreWebView2Controller', None)
+        if controller is not None:
+            controller.DefaultBackgroundColor = transparent
+    except Exception:
+        pass
 
 # Pre-load Windows Forms and System.Drawing assemblies
 try:
@@ -191,14 +223,85 @@ class DesktopApi:
         win = self._get_window()
         return getattr(win, 'native', None) if win else None
 
+    def drag_window(self):
+        """Initiates native Win32 window dragging from frameless header or floating orb."""
+        form = self._get_native_form()
+        if form:
+            try:
+                import ctypes
+                from ctypes import wintypes
+                import System.Windows.Forms as WinForms
+                hwnd = wintypes.HWND(form.Handle.ToInt64())
+                def _drag():
+                    user32 = ctypes.windll.user32
+                    user32.ReleaseCapture()
+                    user32.SendMessageW(hwnd, 0x00A1, 2, 0)  # WM_NCLBUTTONDOWN = 0x00A1, HTCAPTION = 2
+                if form.InvokeRequired:
+                    form.BeginInvoke(WinForms.MethodInvoker(_drag))
+                else:
+                    _drag()
+                return {"status": "ok"}
+            except Exception as e:
+                return {"error": str(e)}
+        return {"error": "no form"}
+
+    def move_window_by(self, dx: int, dy: int):
+        """Smoothly offsets native window position by delta pixels (high-frequency fallback drag)."""
+        form = self._get_native_form()
+        if form:
+            try:
+                import System.Drawing as Drawing
+                import System.Windows.Forms as WinForms
+                def _apply():
+                    scale = getattr(form, '_scale', 1.0)
+                    if hasattr(form, 'DeviceDpi') and form.DeviceDpi > 0:
+                        scale = form.DeviceDpi / 96.0
+                    phys_dx = int(round(dx * scale))
+                    phys_dy = int(round(dy * scale))
+                    new_x = form.Location.X + phys_dx
+                    new_y = form.Location.Y + phys_dy
+
+                    # Screen clamping within current monitor work area
+                    try:
+                        screen = WinForms.Screen.FromControl(form)
+                        working_area = screen.WorkingArea
+                        margin = int(round(12 * scale))
+                        phys_w = form.Size.Width
+                        phys_h = form.Size.Height
+                        if new_x + phys_w > working_area.Right - margin:
+                            new_x = working_area.Right - phys_w - margin
+                        if new_x < working_area.Left + margin:
+                            new_x = working_area.Left + margin
+                        if new_y + phys_h > working_area.Bottom - margin:
+                            new_y = working_area.Bottom - phys_h - margin
+                        if new_y < working_area.Top + margin:
+                            new_y = working_area.Top + margin
+                    except Exception:
+                        pass
+
+                    form.Location = Drawing.Point(new_x, new_y)
+                    SWP_NOSIZE = 0x0001
+                    SWP_NOZORDER = 0x0004
+                    ctypes.windll.user32.SetWindowPos(
+                        form.Handle.ToInt64(), 0, new_x, new_y, 0, 0, SWP_NOSIZE | SWP_NOZORDER
+                    )
+                if form.InvokeRequired:
+                    form.BeginInvoke(WinForms.MethodInvoker(_apply))
+                else:
+                    _apply()
+                return {"status": "ok"}
+            except Exception as e:
+                return {"error": str(e)}
+        return {"error": "no form"}
+
     def resize_window(self, width: int, height: int):
         form = self._get_native_form()
         if form:
             try:
                 import System.Drawing as Drawing
                 import System.Windows.Forms as WinForms
-                target_w = max(180, int(width))
-                target_h = max(180, int(height))
+                target_w = max(150, int(width))
+                target_h = max(150, int(height))
 
                 def _apply():
                     scale = getattr(form, '_scale', 1.0)
@@ -211,7 +314,7 @@ class DesktopApi:
                     try:
                         screen = WinForms.Screen.FromControl(form)
                         working_area = screen.WorkingArea
-                        margin = int(round(16 * scale))
+                        margin = int(round(12 * scale))
 
                         curr_x = form.Location.X
                         curr_y = form.Location.Y
@@ -233,13 +336,31 @@ class DesktopApi:
                     except Exception:
                         pass
 
+                    # Explicitly update Form & child control sizes so WinForms layout engine resizes WebView2
                     form.Size = Drawing.Size(phys_w, phys_h)
+                    form.ClientSize = Drawing.Size(phys_w, phys_h)
+                    for c in form.Controls:
+                        c.Size = Drawing.Size(phys_w, phys_h)
 
+                    # Apply direct Win32 SetWindowPos with SWP_FRAMECHANGED to force immediate redraw
+                    SWP_NOZORDER = 0x0004
+                    SWP_NOACTIVATE = 0x0010
+                    SWP_FRAMECHANGED = 0x0020
+                    ctypes.windll.user32.SetWindowPos(
+                        form.Handle.ToInt64(), 0, new_x, new_y, phys_w, phys_h,
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
+                    )
+                    form.PerformLayout()
+
+                    result_info["x"] = int(round(new_x / scale)) if scale > 0 else new_x
+                    result_info["y"] = int(round(new_y / scale)) if scale > 0 else new_y
+
+                result_info = {"status": "ok", "width": target_w, "height": target_h}
                 if form.InvokeRequired:
-                    form.BeginInvoke(WinForms.MethodInvoker(_apply))
+                    form.Invoke(WinForms.MethodInvoker(_apply))
                 else:
                     _apply()
-                return {"status": "ok", "width": target_w, "height": target_h}
+                return result_info
             except Exception as e:
                 return {"error": str(e)}
 
@@ -303,6 +424,11 @@ class DesktopApi:
                         pass
 
                     form.Location = Drawing.Point(phys_x, phys_y)
+                    SWP_NOSIZE = 0x0001
+                    SWP_NOZORDER = 0x0004
+                    ctypes.windll.user32.SetWindowPos(
+                        form.Handle.ToInt64(), 0, phys_x, phys_y, 0, 0, SWP_NOSIZE | SWP_NOZORDER
+                    )
 
                 if form.InvokeRequired:
                     form.BeginInvoke(WinForms.MethodInvoker(_apply))
@@ -403,18 +529,31 @@ class DesktopApi:
     def close_app(self):
         """Cleanly shuts down Daisy desktop window and background process."""
         try:
+            from backend.lifecycle import lifecycle_manager
+            # Stop Spotify immediately before window destruction
+            lifecycle_manager.stop_spotify()
+            lifecycle_manager.stop_tts()
+        except Exception:
+            pass
+
+        try:
             self.close_window()
         except Exception:
             pass
-        import threading
-        threading.Thread(target=lambda: (time.sleep(0.4), os._exit(0)), daemon=True).start()
+
+        try:
+            from backend.lifecycle import lifecycle_manager
+            lifecycle_manager.shutdown("desktop_api_close_app")
+        except Exception:
+            os._exit(0)
+
         return {"status": "closing"}
 
     def set_window_mode(self, mode: str):
         """
         Switches between 'window' (full application window) and 'floating' (desktop overlay widget).
         In 'window' mode: normal z-order, solid dark window background.
-        In 'floating' mode: always-on-top, transparent desktop cutout key.
+        In 'floating' mode: always-on-top, true DWM desktop transparency without GDI colorkey.
         """
         form = self._get_native_form()
         if not form:
@@ -425,17 +564,23 @@ class DesktopApi:
 
             def _apply():
                 try:
+                    hwnd = form.Handle.ToInt64()
                     if mode == 'floating':
                         form.TopMost = True
                         form.AllowTransparency = True
-                        key = Drawing.Color.FromArgb(1, 1, 1)
-                        form.BackColor = key
-                        form.TransparencyKey = key
-                        enable_dwm_transparency(int(form.Handle.ToInt64()))
+                        form.TransparencyKey = Drawing.Color.Magenta
+                        form.BackColor = Drawing.Color.Magenta
+                        for c in form.Controls:
+                            c.BackColor = Drawing.Color.Magenta
+                            set_webview_transparent(c)
+                        enable_dwm_transparency(hwnd)
                     else:
                         form.TopMost = False
+                        form.AllowTransparency = False
                         form.TransparencyKey = Drawing.Color.Empty
                         form.BackColor = Drawing.Color.FromArgb(9, 11, 17)
+                        for c in form.Controls:
+                            c.BackColor = Drawing.Color.FromArgb(9, 11, 17)
                 except Exception as e:
                     print(f"[DaisyApi] Error setting window mode: {e}")
 
@@ -486,7 +631,7 @@ def main():
         height=680,
         resizable=True,
         frameless=True,
-        easy_drag=True,
+        easy_drag=False,
         on_top=False,
         transparent=True,
         js_api=api
@@ -501,8 +646,27 @@ def main():
                 import System.Drawing as Drawing
                 def _setup():
                     try:
+                        hwnd = form.Handle.ToInt64()
+                        ico_path = os.path.join(PROJECT_ROOT, "assets", "daisy.ico")
+                        if os.path.exists(ico_path):
+                            try:
+                                icon_obj = Drawing.Icon(ico_path)
+                                form.Icon = icon_obj
+                                form.ShowIcon = True
+                                # Send WM_SETICON directly to HWND (ICON_SMALL = 0, ICON_BIG = 1, WM_SETICON = 0x0080)
+                                user32 = ctypes.windll.user32
+                                h_icon = icon_obj.Handle.ToInt64()
+                                user32.SendMessageW(wintypes.HWND(hwnd), 0x0080, 0, h_icon)
+                                user32.SendMessageW(wintypes.HWND(hwnd), 0x0080, 1, h_icon)
+                            except Exception as ico_err:
+                                print(f"[Daisy] Icon set note: {ico_err}")
                         form.AllowTransparency = True
-                        form.BackColor = Drawing.Color.FromArgb(9, 11, 17)
+                        form.TransparencyKey = Drawing.Color.Magenta
+                        form.BackColor = Drawing.Color.Magenta
+                        for c in form.Controls:
+                            c.BackColor = Drawing.Color.Magenta
+                            set_webview_transparent(c)
+                        enable_dwm_transparency(hwnd)
                     except Exception as e:
                         print(f"[Daisy] Setup Transparency note: {e}")
                 if form.InvokeRequired:
@@ -515,15 +679,29 @@ def main():
     window.events.shown += on_window_shown
 
     def on_window_closed():
-        threading.Thread(target=lambda: (time.sleep(0.1), os._exit(0)), daemon=True).start()
+        try:
+            from backend.lifecycle import lifecycle_manager
+            lifecycle_manager.shutdown("window_closed")
+        except Exception:
+            os._exit(0)
 
     window.events.closed += on_window_closed
 
     # 4. Start GUI event loop
+    ico_path = os.path.join(PROJECT_ROOT, "assets", "daisy.ico")
     try:
+        if os.path.exists(ico_path):
+            webview.start(icon=ico_path, debug=False)
+        else:
+            webview.start(debug=False)
+    except TypeError:
         webview.start(debug=False)
     finally:
-        os._exit(0)
+        try:
+            from backend.lifecycle import lifecycle_manager
+            lifecycle_manager.shutdown("webview_exit")
+        except Exception:
+            os._exit(0)
 
 if __name__ == "__main__":
     main()

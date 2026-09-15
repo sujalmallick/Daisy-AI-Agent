@@ -23,56 +23,24 @@ class FastPathEngine:
         import time
 
         # 0. Check if there is an active pending confirmation (e.g. "Are you sure you want to close Chrome?")
-        if (
-            cls.pending_confirmation is not None
-            and (time.time() - cls.pending_timestamp) < cls.CONFIRMATION_TIMEOUT_SECS
-        ):
+        from backend.hitl.manager import hitl_manager
+        if hitl_manager.has_pending():
             parsed = AlexaIntentParser.parse(prompt)
             if any(p.get("action") == "confirm_yes" for p in parsed):
-                pending = cls.pending_confirmation
-                cls.pending_confirmation = None
-                display = pending.get("display_name", "the app")
-
-                if pending.get("type") == "exit_app":
-                    return {
-                        "mode": "fastpath_confirmation",
-                        "tokens_consumed": 0,
-                        "latency_ms": 10,
-                        "actions_executed": 1,
-                        "results": [{
-                            "success": True,
-                            "tool": "system.exit_app",
-                            "result": {
-                                "status": "exiting",
-                                "action": "exit_app",
-                                "should_exit": True,
-                                "message": "Sayonara! Goodbye!"
-                            }
-                        }]
-                    }
-                else:
-                    # Execute confirmed app close
-                    res = mcp_manager.execute("app_launcher.close_app", {"app_name": pending["app_name"]})
-                    return {
-                        "mode": "fastpath_confirmation",
-                        "tokens_consumed": 0,
-                        "latency_ms": 10,
-                        "actions_executed": 1,
-                        "results": [{
-                            "success": True,
-                            "tool": "app_launcher.close_app",
-                            "result": {
-                                "status": "app_closed",
-                                "app": display,
-                                "message": f"Closed {display}."
-                            }
-                        }]
-                    }
-
+                res = hitl_manager.resolve(approved=True)
+                return {
+                    "mode": "fastpath_confirmation",
+                    "tokens_consumed": 0,
+                    "latency_ms": 10,
+                    "actions_executed": 1,
+                    "results": [{
+                        "success": res.get("success", True),
+                        "tool": res.get("tool", "hitl.confirm"),
+                        "result": res
+                    }]
+                }
             elif any(p.get("action") == "confirm_no" for p in parsed):
-                pending = cls.pending_confirmation
-                cls.pending_confirmation = None
-                display = pending.get("display_name", "the app")
+                res = hitl_manager.resolve(approved=False)
                 return {
                     "mode": "fastpath_confirmation",
                     "tokens_consumed": 0,
@@ -81,16 +49,12 @@ class FastPathEngine:
                     "results": [{
                         "success": True,
                         "tool": "system.cancel",
-                        "result": {
-                            "status": "cancelled",
-                            "action": "cancel",
-                            "message": f"Okay, keeping {display} open."
-                        }
+                        "result": res
                     }]
                 }
             else:
                 # User asked something else — clear pending confirmation and proceed
-                cls.pending_confirmation = None
+                hitl_manager.clear()
 
         # Check custom tool trigger phrases first (0 tokens)
         from backend.mcp.custom_loader import custom_tool_manager
@@ -154,6 +118,12 @@ class FastPathEngine:
             elif action == "set_volume":
                 results.append(mcp_manager.execute("spotify.set_volume", {"percent": slots.get("level", 70)}))
 
+            elif action == "toggle_shuffle":
+                results.append(mcp_manager.execute("spotify.set_shuffle", {"state": slots.get("state", "toggle")}))
+
+            elif action == "toggle_repeat":
+                results.append(mcp_manager.execute("spotify.set_repeat", {"state": slots.get("state", "toggle")}))
+
             elif action == "volume_up":
                 results.append(mcp_manager.execute("spotify.set_volume", {"percent": 80}))
 
@@ -174,26 +144,56 @@ class FastPathEngine:
                 display_name = app_launcher_server.KNOWN_APPS.get(norm, (None, app_name.title()))[1]
                 if norm in ["daisy", "this app", "the app", "yourself", "assistant"]:
                     display_name = "Daisy"
+                    tool_name = "system.exit_app"
+                    act_type = "exit_app"
+                else:
+                    tool_name = "app_launcher.close_app"
+                    act_type = "close_app"
 
-                # Store pending confirmation
-                cls.pending_confirmation = {
-                    "type": "exit_app" if norm in ["daisy", "this app", "the app", "yourself", "assistant"] else "close_app",
-                    "app_name": app_name,
-                    "display_name": display_name
-                }
-                cls.pending_timestamp = time.time()
-
+                hitl_res = hitl_manager.request_confirmation(
+                    action_type=act_type,
+                    tool_name=tool_name,
+                    args={"app_name": app_name},
+                    prompt_message=f"Are you sure you want to close {display_name}?",
+                    display_name=display_name
+                )
                 results.append({
                     "success": True,
                     "tool": "system.ask_confirmation",
-                    "result": {
-                        "status": "awaiting_confirmation",
-                        "action": "confirm_close_app",
-                        "app_name": display_name,
-                        "awaiting_confirmation": True,
-                        "message": f"Are you sure you want to close {display_name}?"
-                    }
+                    "result": hitl_res
                 })
+
+            elif action in ("query_document", "summarize_document"):
+                from backend.rag.retriever import desktop_rag
+                doc_name = slots.get("doc_name", "")
+                resolved = desktop_rag.resolve_and_index(doc_name)
+                if resolved.get("status") == "not_found":
+                    results.append({
+                        "success": False,
+                        "tool": "rag.resolve_document",
+                        "result": {
+                            "status": "not_found",
+                            "message": resolved.get("error", f"Could not find any document matching '{doc_name}'.")
+                        }
+                    })
+                elif resolved.get("status") == "multiple_candidates":
+                    hitl_res = hitl_manager.request_confirmation(
+                        action_type="confirm_disambiguation",
+                        tool_name="rag.query_desktop_doc",
+                        args={"doc_name": doc_name, "candidates": resolved.get("candidate_paths", [])},
+                        prompt_message=resolved.get("message", f"Which file would you like?"),
+                        display_name=doc_name,
+                        risk_tier=2,
+                        candidates=resolved.get("candidates", [])
+                    )
+                    results.append({
+                        "success": True,
+                        "tool": "system.ask_disambiguation",
+                        "result": hitl_res
+                    })
+                else:
+                    # Document is located and indexed. Pass to agentic planner for token-efficient synthesis.
+                    return None
 
             elif action == "exit_app":
                 results.append({

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Terminal, 
   Cpu, 
@@ -20,16 +20,24 @@ interface LogEntry {
 
 interface SystemStatus {
   status: string;
-  hardware: {
-    tier_name: string;
-    device: string;
-    compute_type: string;
+  uptime_seconds?: number;
+  memory_rss_mb?: number;
+  cpu_percent?: number;
+  active_threads?: number;
+  hardware?: {
+    tier_name?: string;
+    device?: string;
+    compute_type?: string;
     gpu_name?: string;
   };
-  spotify_connected: boolean;
-  registered_servers: string[];
-  tools_count: number;
-  tools: Array<{ name: string; description: string; parameters: any }>;
+  spotify_connected?: boolean;
+  audio_devices?: {
+    input_devices: string[];
+    output_devices: string[];
+  };
+  registered_servers?: string[];
+  tools_count?: number;
+  tools?: Array<{ name: string; description: string; parameters: any }>;
 }
 
 interface DashboardViewProps {
@@ -46,9 +54,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onBackToOrb, onSpe
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
   const [testResult, setTestResult] = useState<string | null>(null);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async (silent = false) => {
     try {
-      setIsRefreshing(true);
+      if (!silent) setIsRefreshing(true);
       const [logsRes, statusRes] = await Promise.all([
         fetch('http://127.0.0.1:8000/logs').catch(() => null),
         fetch('http://127.0.0.1:8000/system/status').catch(() => null)
@@ -65,18 +73,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onBackToOrb, onSpe
     } catch (e) {
       console.warn('Dashboard fetch error:', e);
     } finally {
-      setIsRefreshing(false);
+      if (!silent) setIsRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchDashboardData();
+    const timer = window.setTimeout(() => {
+      fetchDashboardData(true);
+    }, 0);
     let interval: any = null;
     if (autoRefresh) {
-      interval = setInterval(fetchDashboardData, 2000);
+      interval = setInterval(() => fetchDashboardData(true), 2000);
     }
-    return () => clearInterval(interval);
-  }, [autoRefresh]);
+    return () => {
+      window.clearTimeout(timer);
+      if (interval) clearInterval(interval);
+    };
+  }, [autoRefresh, fetchDashboardData]);
 
   const clearLogs = async () => {
     try {
@@ -130,7 +143,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onBackToOrb, onSpe
             {autoRefresh ? '● Live Polling' : 'Paused'}
           </button>
           <button
-            onClick={fetchDashboardData}
+            onClick={() => fetchDashboardData(false)}
             className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition cursor-pointer"
             title="Refresh now"
           >
@@ -147,7 +160,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onBackToOrb, onSpe
             <Cpu className="w-3.5 h-3.5 text-emerald-400" />
           </div>
           <div className="text-xs font-semibold text-white truncate">
-            {status?.hardware.gpu_name || 'NVIDIA RTX 3050'}
+            {status?.hardware?.gpu_name || 'NVIDIA RTX 3050'}
           </div>
           <div className="text-[10px] text-emerald-400 mt-0.5">Tier 1 • CUDA 13.2 (float16)</div>
         </div>

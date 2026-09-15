@@ -9,6 +9,23 @@ def detect_hardware_tier() -> dict:
       - Tier 2: DirectML (AMD / Intel dedicated or integrated GPUs)
       - Tier 3: CPU-Only (8-bit quantized whisper, 4 threads, <250MB RAM)
     """
+    forced_tier = os.getenv("DAISY_HARDWARE_TIER", "auto").strip().lower()
+    if forced_tier in ("cuda", "directml", "cpu"):
+        forced_values = {
+            "cuda": (1, "CUDA_GPU", "cuda", "float16", "Configured CUDA execution"),
+            "directml": (2, "DIRECTML", "directml", "float16", "Configured DirectML execution"),
+            "cpu": (3, "CPU_QUANTIZED", "cpu", "int8", "Configured CPU execution"),
+        }
+        tier, tier_name, device, compute_type, description = forced_values[forced_tier]
+        return {
+            "tier": tier,
+            "tier_name": tier_name,
+            "device": device,
+            "compute_type": compute_type,
+            "description": description,
+            "gpu_name": None,
+        }
+
     # 1. Check for NVIDIA CUDA
     try:
         smi = shutil.which("nvidia-smi")

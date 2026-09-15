@@ -8,6 +8,7 @@ if PROJECT_ROOT not in sys.path:
 
 import html
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,6 +18,7 @@ from backend.agent.planner import agentic_planner
 from datetime import datetime
 from backend.voice.tts_engine import TTSEngine
 from backend.voice.tts_manager import tts_manager
+from backend.lifecycle import lifecycle_manager
 
 # In-Memory Live Logs Buffer
 LOG_BUFFER = []
@@ -42,7 +44,13 @@ logging.getLogger().addHandler(mem_handler)
 
 logger = logging.getLogger("daisy.api")
 
-app = FastAPI(title="Daisy AI Voice Assistant Engine", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    logger.info("[Main] FastAPI shutdown event received. Executing lifecycle shutdown...")
+    lifecycle_manager.shutdown("fastapi_shutdown")
+
+app = FastAPI(title="Daisy AI Voice Assistant Engine", version="0.1.0", lifespan=lifespan)
 
 # Restrict CORS to local application origins
 app.add_middleware(
@@ -69,7 +77,7 @@ if os.path.exists(DIST_DIR):
 
 class CommandRequest(BaseModel):
     prompt: str
-    speak_backend: bool = True
+    speak_backend: bool = False
     assistant_name: Optional[str] = None
 
 class AssistantConfigRequest(BaseModel):
@@ -134,6 +142,26 @@ async def handle_command(req: CommandRequest):
 
     return result
 
+class HITLRespondRequest(BaseModel):
+    approved: bool
+    action_id: Optional[str] = None
+    speak_backend: bool = False
+
+@app.get("/hitl/pending")
+def get_hitl_pending():
+    from backend.hitl.manager import hitl_manager
+    pending = hitl_manager.get_pending()
+    return {"pending": pending is not None, "action": pending}
+
+@app.post("/hitl/respond")
+async def respond_hitl(req: HITLRespondRequest):
+    from backend.hitl.manager import hitl_manager
+    res = hitl_manager.resolve(approved=req.approved)
+    spoken = res.get("message", "Done.")
+    if req.speak_backend and spoken and spoken != "Done.":
+        TTSEngine.speak(spoken)
+    return res
+
 @app.get("/devices")
 def list_devices():
     from backend.mcp.servers.spotify.server import spotify_server
@@ -168,7 +196,26 @@ def execute_playback_action(req: PlaybackActionRequest):
     elif act == "volume":
         vol = int(req.value) if req.value is not None else 70
         return mcp_manager.execute("spotify.set_volume", {"percent": vol})
+    elif act == "shuffle":
+        return mcp_manager.execute("spotify.set_shuffle", {"state": str(req.value or "toggle")})
+    elif act == "repeat":
+        return mcp_manager.execute("spotify.set_repeat", {"state": str(req.value or "toggle")})
+    elif act == "duck":
+        percent = int(req.value) if req.value is not None else 18
+        return mcp_manager.execute("spotify.duck", {"percent": percent})
+    elif act == "unduck":
+        return mcp_manager.execute("spotify.unduck")
     return {"error": f"Unknown playback action '{req.action}'"}
+
+@app.post("/playback/duck")
+def duck_playback(percent: int = 18):
+    from backend.mcp.servers.spotify.server import spotify_server
+    return spotify_server.duck_volume(target_percent=percent)
+
+@app.post("/playback/unduck")
+def unduck_playback():
+    from backend.mcp.servers.spotify.server import spotify_server
+    return spotify_server.unduck_volume()
 
 @app.get("/auth/status")
 def auth_status():
@@ -271,16 +318,14 @@ def stop_voice():
     tts_manager.stop()
     return {"status": "stopped"}
 
+
+@app.post("/system/shutdown")
 @app.post("/system/exit")
 def exit_system():
-    """Terminates Daisy backend and host process cleanly after farewell speech."""
-    import time
-    logger.info("Shutdown requested via voice/system. Exiting Daisy...")
-    def _delayed_exit():
-        time.sleep(1.8)
-        os._exit(0)
-    threading.Thread(target=_delayed_exit, daemon=True).start()
-    return {"status": "exiting", "message": "Sayonara! Goodbye!"}
+    """Immediately halts Spotify playback, stops TTS, and cleanly exits Daisy."""
+    logger.info("[Main] System shutdown requested. Stopping Spotify and shutting down...")
+    lifecycle_manager.shutdown("api_request")
+    return {"status": "shutting_down", "message": "Spotify stopped and Daisy shutting down."}
 
 
 

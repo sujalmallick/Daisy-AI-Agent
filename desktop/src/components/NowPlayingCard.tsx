@@ -21,6 +21,8 @@ export interface NowPlayingCardProps {
   onTogglePlay: () => void;
   onNext: () => void;
   onPrev: () => void;
+  onToggleShuffle: () => void;
+  onToggleRepeat: () => void;
   onVolumeChange: (val: number) => void;
   onRefresh?: () => void;
   isLoading?: boolean;
@@ -33,6 +35,8 @@ export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({
   onTogglePlay,
   onNext,
   onPrev,
+  onToggleShuffle,
+  onToggleRepeat,
   onVolumeChange,
   onRefresh,
   isLoading = false,
@@ -63,13 +67,13 @@ export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({
 
   return (
     <div
-      className="w-[310px] now-playing-card p-5 flex flex-col justify-between select-none shadow-2xl backdrop-blur-2xl bg-[#0c0f14]/90 border border-white/10 rounded-3xl transition-all duration-300"
+      className="no-drag-surface w-[310px] now-playing-card p-5 flex flex-col justify-between select-none shadow-2xl backdrop-blur-2xl bg-[#0c0f14]/90 border border-white/10 rounded-3xl transition-all duration-300"
       style={{
         boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.15)',
       }}
     >
       {/* Header: NOW PLAYING & Device Pill & Close Button */}
-      <div className="flex items-center justify-between mb-3.5 data-tauri-drag-region pywebview-drag-region cursor-move">
+      <div className="no-drag-surface flex items-center justify-between mb-3.5">
         <div className="flex items-center gap-1.5 no-drag">
           <span className="text-[11px] font-bold tracking-wider text-zinc-400 uppercase">NOW PLAYING</span>
           {onRefresh && (
@@ -184,6 +188,7 @@ export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({
       {/* Transport Controls */}
       <div className="flex items-center justify-between px-1 my-1.5">
         <button
+          onClick={onToggleShuffle}
           className={`p-1.5 transition cursor-pointer ${playback.shuffleState ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           title="Shuffle"
         >
@@ -219,6 +224,7 @@ export const NowPlayingCard: React.FC<NowPlayingCardProps> = ({
         </button>
 
         <button
+          onClick={onToggleRepeat}
           className={`p-1.5 transition cursor-pointer ${playback.repeatState !== 'off' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
           title={`Repeat: ${playback.repeatState}`}
         >

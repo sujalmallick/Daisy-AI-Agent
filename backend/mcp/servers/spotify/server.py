@@ -20,6 +20,7 @@ class SpotifyMCPServer:
         self.sp = None
         self.auth_manager = None
         self._last_network_error_time = 0
+        self._saved_pre_duck_volume = None
         self._init_client()
 
     def _init_client(self):
@@ -153,6 +154,28 @@ class SpotifyMCPServer:
                 "parameters": {"type": "object", "properties": {}}
             },
             {
+                "name": "set_shuffle",
+                "description": "Turns Spotify shuffle on, off, or toggles its current state.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "state": {"type": "string", "description": "on, off, or toggle"}
+                    },
+                    "required": ["state"]
+                }
+            },
+            {
+                "name": "set_repeat",
+                "description": "Sets Spotify repeat to off, context, track, or toggles its current state.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "state": {"type": "string", "description": "off, context, track, or toggle"}
+                    },
+                    "required": ["state"]
+                }
+            },
+            {
                 "name": "recommend_vibes",
                 "description": "Starts a curated vibe session with recommended tracks based on mood or genre.",
                 "parameters": {
@@ -162,6 +185,21 @@ class SpotifyMCPServer:
                         "mood": {"type": "string", "description": "Mood description e.g. 'late night', 'chill', 'workout'"}
                     }
                 }
+            },
+            {
+                "name": "duck",
+                "description": "Temporarily ducks Spotify playback volume to allow clean voice listening.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "percent": {"type": "integer", "description": "Target ducked volume level (default 18)"}
+                    }
+                }
+            },
+            {
+                "name": "unduck",
+                "description": "Restores Spotify playback volume back to the pre-duck level.",
+                "parameters": {"type": "object", "properties": {}}
             }
         ]
 
@@ -183,6 +221,48 @@ class SpotifyMCPServer:
         except Exception:
             return False
 
+    def duck_volume(self, target_percent: int = 18) -> Dict[str, Any]:
+        """Temporarily drops Spotify playback volume to allow clean voice transcription."""
+        if not self.sp or not self.is_authenticated():
+            return {"status": "skipped", "message": "Spotify not active"}
+        try:
+            pb = self.sp.current_playback()
+            if not pb or not pb.get("is_playing"):
+                return {"status": "not_playing"}
+            device = pb.get("device") or {}
+            curr = device.get("volume_percent")
+            if curr is not None and self._saved_pre_duck_volume is None:
+                self._saved_pre_duck_volume = curr
+            dev_id = device.get("id") or self._ensure_active_device()
+            self.sp.volume(max(0, min(100, target_percent)), device_id=dev_id)
+            return {
+                "status": "ducked",
+                "ducked_to": target_percent,
+                "previous_volume": self._saved_pre_duck_volume
+            }
+        except Exception as e:
+            logger.debug(f"Duck volume exception: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def unduck_volume(self) -> Dict[str, Any]:
+        """Restores Spotify volume to the pre-duck level."""
+        if not self.sp or not self.is_authenticated():
+            return {"status": "skipped", "message": "Spotify not active"}
+        if self._saved_pre_duck_volume is None:
+            return {"status": "not_ducked"}
+        target_vol = self._saved_pre_duck_volume
+        self._saved_pre_duck_volume = None
+        try:
+            pb = self.sp.current_playback()
+            if pb:
+                device = pb.get("device") or {}
+                dev_id = device.get("id") or self._ensure_active_device()
+                self.sp.volume(target_vol, device_id=dev_id)
+            return {"status": "unducked", "restored_volume": target_vol}
+        except Exception as e:
+            logger.debug(f"Unduck volume exception: {e}")
+            return {"status": "error", "message": str(e)}
+
     def execute_tool(self, tool_name: str, args: Dict[str, Any] = None) -> Any:
         args = args or {}
         if not self.sp:
@@ -196,7 +276,7 @@ class SpotifyMCPServer:
             }
         # Ensure active device is resolved for all playback controls
         target_device_id = None
-        if tool_name in ("play", "play_album", "resume", "next_track", "previous_track", "pause", "set_volume", "recommend_vibes"):
+        if tool_name in ("play", "play_album", "resume", "next_track", "previous_track", "pause", "set_volume", "set_shuffle", "set_repeat", "recommend_vibes"):
             target_device_id = self._ensure_active_device()
 
         try:
@@ -312,6 +392,25 @@ class SpotifyMCPServer:
                 self.sp.volume(vol, device_id=target_device_id)
                 return {"status": "volume_adjusted", "volume": vol, "message": f"Volume set to {vol}%."}
 
+            elif tool_name == "set_shuffle":
+                state = str(args.get("state", "toggle")).lower()
+                if state == "toggle":
+                    current = self.sp.current_playback() or {}
+                    state = "off" if current.get("shuffle_state") else "on"
+                enabled = state == "on"
+                self.sp.shuffle(enabled, device_id=target_device_id)
+                return {"status": "shuffle_updated", "shuffle_state": enabled, "message": f"Shuffle {'on' if enabled else 'off'}."}
+
+            elif tool_name == "set_repeat":
+                state = str(args.get("state", "toggle")).lower()
+                if state == "toggle":
+                    current = self.sp.current_playback() or {}
+                    state = "off" if current.get("repeat_state", "off") != "off" else "context"
+                if state not in ("off", "context", "track"):
+                    return {"error": "Repeat state must be off, context, track, or toggle."}
+                self.sp.repeat(state, device_id=target_device_id)
+                return {"status": "repeat_updated", "repeat_state": state, "message": f"Repeat {state}."}
+
             elif tool_name == "get_playback":
                 import time
                 if time.time() - self._last_network_error_time < 5.0:
@@ -376,6 +475,13 @@ class SpotifyMCPServer:
                     "count": len(uris),
                     "message": f"Started vibe session with {len(uris)} recommended tracks."
                 }
+
+            elif tool_name == "duck":
+                target = int(args.get("percent", 18))
+                return self.duck_volume(target_percent=target)
+
+            elif tool_name == "unduck":
+                return self.unduck_volume()
 
         except Exception as e:
             import time
