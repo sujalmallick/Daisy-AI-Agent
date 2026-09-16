@@ -36,7 +36,12 @@ def apply_windows_audio_optimizations() -> Dict[str, Any]:
         # 2. Configure WebView2 browser arguments
         try:
             current_args = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
-            audio_args = "--disable-features=WASAPIRawAudioCapture --autoplay-policy=no-user-gesture-required --enable-features=WebRtcAllowInputVolumeModification"
+            audio_args = (
+                "--disable-features=WASAPIRawAudioCapture "
+                "--autoplay-policy=no-user-gesture-required "
+                "--enable-features=WebRtcAllowInputVolumeModification "
+                "--use-fake-ui-for-media-stream"   # ← auto-grants mic without native OS dialog
+            )
             if "WASAPIRawAudioCapture" not in current_args:
                 os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = f"{current_args} {audio_args}".strip()
             result["webview2_flags_set"] = True

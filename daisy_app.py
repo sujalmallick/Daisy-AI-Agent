@@ -667,6 +667,38 @@ def main():
                             c.BackColor = Drawing.Color.Magenta
                             set_webview_transparent(c)
                         enable_dwm_transparency(hwnd)
+
+                        # ── Grant microphone permission to WebView2 ──────────────────
+                        # This auto-approves the SpeechRecognition / getUserMedia mic request
+                        # so Daisy can listen without a native browser permission prompt blocking the UI.
+                        try:
+                            for ctrl in form.Controls:
+                                wv2 = getattr(ctrl, 'webview', None) or ctrl
+                                core = getattr(wv2, 'CoreWebView2', None)
+                                if core is None:
+                                    continue
+                                def _on_perm_requested(sender, args):
+                                    try:
+                                        from Microsoft.Web.WebView2.Core import CoreWebView2PermissionState, CoreWebView2PermissionKind
+                                        if args.PermissionKind in (
+                                            CoreWebView2PermissionKind.Microphone,
+                                            CoreWebView2PermissionKind.Camera,
+                                        ):
+                                            args.State = CoreWebView2PermissionState.Allow
+                                    except Exception:
+                                        try:
+                                            # Fallback: grant via integer enum value (Microphone=3, Camera=4)
+                                            if int(args.PermissionKind) in (3, 4):
+                                                args.State = type(args.State)(1)  # Allow = 1
+                                        except Exception:
+                                            pass
+                                core.PermissionRequested += _on_perm_requested
+                                print("[Daisy] WebView2 microphone permission auto-grant wired.")
+                                break
+                        except Exception as perm_err:
+                            print(f"[Daisy] Permission grant note (non-fatal): {perm_err}")
+                        # ────────────────────────────────────────────────────────────
+
                     except Exception as e:
                         print(f"[Daisy] Setup Transparency note: {e}")
                 if form.InvokeRequired:

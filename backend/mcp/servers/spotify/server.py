@@ -53,42 +53,34 @@ class SpotifyMCPServer:
             logger.error(f"Failed to initialize Spotify client: {e}")
 
     def _ensure_active_device(self) -> Optional[str]:
-        """Edge Case: Checks for an active device; auto-transfers playback if found."""
+        """
+        Finds an already-active/available Spotify device WITHOUT launching the app.
+        Auto-launch is intentionally removed — it caused Spotify to open on shutdown
+        because pause() calls this method even when nothing is playing.
+        Only the explicit play() path should open Spotify if needed.
+        """
         if not self.sp:
             return None
         try:
             devices = self.sp.devices().get("devices", [])
-            # Priority 1: Always prefer local Computer / Desktop device over third-party smart speakers
-            # Smart speakers (Amazon Echo, Nest, etc.) enforce strict API restrictions (403 Restriction violated)
+
+            # Priority 1: Prefer local Computer / Desktop device (avoids 403 on smart speakers)
             computer_dev = next((d for d in devices if d.get("type") in ("Computer", "Desktop")), None)
             if computer_dev:
                 return computer_dev["id"]
 
-            # Priority 2: If no Computer device is registered yet, launch Spotify desktop on PC
-            logger.info("No Computer Spotify device found. Launching Spotify desktop on PC...")
-            try:
-                import subprocess, time
-                subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
-                time.sleep(1.8)
-                refreshed = self.sp.devices().get("devices", [])
-                comp = next((d for d in refreshed if d.get("type") in ("Computer", "Desktop")), None)
-                if comp:
-                    return comp["id"]
-            except Exception as e:
-                logger.debug(f"Auto-launch Spotify notice: {e}")
+            # Priority 2: Return any currently active device
+            active_dev = next((d for d in devices if d.get("is_active")), None)
+            if active_dev:
+                return active_dev.get("id")
 
-            # Priority 3: Check if an active device exists
-            for dev in devices:
-                if dev.get("is_active"):
-                    return dev.get("id")
-
-            # Priority 4: Fallback to first available device
+            # Priority 3: Return first available device (if any)
             if devices:
                 return devices[0]["id"]
 
             return None
         except Exception as e:
-            logger.warning(f"Could not auto-transfer playback: {e}")
+            logger.warning(f"Could not find active Spotify device: {e}")
             return None
 
     def get_tools(self) -> List[Dict[str, Any]]:
