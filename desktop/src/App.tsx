@@ -295,6 +295,7 @@ export function App() {
             volume: result.volume_percent ?? 50,
             shuffleState: !!result.shuffle_state,
             repeatState: result.repeat_state || 'off',
+            uri: result.uri,
           };
           setPlayback(nextPlayback);
           try {
@@ -477,6 +478,7 @@ export function App() {
             artworkUrl: artworkUrl || prev.artworkUrl,
             durationMs: durationMs || prev.durationMs,
             progressMs: 0,
+            uri: data.card_data?.uri || prev.uri,
           };
           try {
             localStorage.setItem('daisy_last_playback', JSON.stringify(next));
@@ -926,12 +928,14 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [playback.isPlaying, playback.durationMs]);
 
-  const executeAction = useCallback(async (action: string, value?: any, label?: string) => {
+  const executeAction = useCallback(async (action: string, value?: any, label?: string, customUri?: string, customTrack?: string) => {
     try {
+      const uri = customUri || playback.uri;
+      const track = customTrack || playback.trackTitle;
       let res = await fetch('http://127.0.0.1:8000/playback/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, value }),
+        body: JSON.stringify({ action, value, uri, track }),
       });
 
       if (!res.ok && res.status === 404) {
@@ -954,12 +958,18 @@ export function App() {
     } catch (err) {
       console.warn(`Action '${action}' failed:`, err);
     }
-  }, [showToast, fetchLivePlayback]);
+  }, [showToast, fetchLivePlayback, playback.uri, playback.trackTitle]);
 
   const togglePlay = () => {
     const nextState = !playback.isPlaying;
     setPlayback((prev) => ({ ...prev, isPlaying: nextState }));
-    executeAction(nextState ? 'resume' : 'pause', null, nextState ? 'Playback Resumed' : 'Playback Paused');
+    executeAction(
+      nextState ? 'resume' : 'pause',
+      null,
+      nextState ? 'Playback Resumed' : 'Playback Paused',
+      playback.uri,
+      playback.trackTitle
+    );
   };
 
   const handleNext = () => {

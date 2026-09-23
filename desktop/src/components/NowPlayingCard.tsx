@@ -12,6 +12,7 @@ export interface PlaybackState {
   volume: number;
   shuffleState: boolean;
   repeatState: string;
+  uri?: string;
 }
 
 export interface NowPlayingCardProps {

@@ -25,6 +25,35 @@ class SpotifyMCPServer:
         self._last_known_track_info: Dict[str, Any] = self._load_last_track_info()
         self._init_client()
 
+    def _init_client(self):
+        try:
+            from spotipy import Spotify, SpotifyOAuth
+            client_id = os.getenv("SPOTIPY_CLIENT_ID")
+            client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
+            redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI", "http://localhost:8888/callback")
+
+            # Suppress noisy transient urllib3 retry warnings
+            logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
+
+            if client_id and client_secret:
+                self.auth_manager = SpotifyOAuth(
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    redirect_uri=redirect_uri,
+                    scope="user-modify-playback-state user-read-playback-state",
+                    open_browser=True
+                )
+                self.sp = Spotify(
+                    auth_manager=self.auth_manager,
+                    requests_timeout=10,
+                    retries=1
+                )
+                logger.info("Spotify MCP Server successfully configured.")
+            else:
+                logger.warning("SPOTIPY_CLIENT_ID or SPOTIPY_CLIENT_SECRET not set in environment.")
+        except Exception as e:
+            logger.error(f"Failed to initialize Spotify client: {e}")
+
     def _load_last_track_info(self) -> Dict[str, Any]:
         try:
             import json
