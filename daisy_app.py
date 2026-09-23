@@ -694,6 +694,19 @@ def main():
                                             pass
                                 core.PermissionRequested += _on_perm_requested
                                 print("[Daisy] WebView2 microphone permission auto-grant wired.")
+
+                                def _on_new_window_requested(sender, args):
+                                    try:
+                                        args.Handled = True
+                                        import webbrowser
+                                        uri = getattr(args, "Uri", None)
+                                        if uri:
+                                            webbrowser.open(str(uri))
+                                    except Exception as nw_err:
+                                        print(f"[Daisy] New window open note: {nw_err}")
+
+                                core.NewWindowRequested += _on_new_window_requested
+                                print("[Daisy] WebView2 external links & popups routed to default browser.")
                                 break
                         except Exception as perm_err:
                             print(f"[Daisy] Permission grant note (non-fatal): {perm_err}")
