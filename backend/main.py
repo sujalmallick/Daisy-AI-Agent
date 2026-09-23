@@ -172,6 +172,20 @@ def list_devices():
             return {"error": str(e)}
     return {"devices": []}
 
+# ── Screen Vision Endpoints ───────────────────────────────────────────────────
+
+@app.get("/screen/capture")
+def capture_screen_endpoint():
+    """Captures live screen and returns metadata + base64 preview URL."""
+    from backend.mcp.servers.screen.server import screen_server
+    return screen_server.execute_tool("capture_screen", {})
+
+@app.get("/screen/active_window")
+def active_window_endpoint():
+    """Returns foreground window title."""
+    from backend.mcp.servers.screen.server import screen_server
+    return screen_server.execute_tool("get_active_window", {})
+
 class PlaybackActionRequest(BaseModel):
     action: str
     value: Optional[Any] = None

@@ -17,7 +17,9 @@ import {
   Terminal,
   Sparkles,
   Zap,
-  PlaySquare
+  PlaySquare,
+  Eye,
+  Crosshair,
 } from 'lucide-react';
 
 export interface ConversationCardData {
@@ -26,7 +28,7 @@ export interface ConversationCardData {
   source?: string;
   spokenReply?: string;
   displayText?: string;
-  cardType?: 'weather' | 'youtube' | 'web' | 'music' | 'tool' | 'answer';
+  cardType?: 'weather' | 'youtube' | 'web' | 'music' | 'tool' | 'answer' | 'vision';
   cardData?: any;
   timestamp: string;
 }
@@ -35,6 +37,7 @@ interface ConversationCardProps {
   card: ConversationCardData;
   onDismiss: () => void;
   onSpeak?: (text: string) => void;
+  onHighlight?: (target: { x: number; y: number; label?: string; width?: number; height?: number }) => void;
   compact?: boolean;
 }
 
@@ -42,6 +45,7 @@ export const ConversationCard: React.FC<ConversationCardProps> = ({
   card,
   onDismiss,
   onSpeak,
+  onHighlight,
   compact = false,
 }) => {
   const [copied, setCopied] = useState(false);
@@ -422,7 +426,62 @@ export const ConversationCard: React.FC<ConversationCardProps> = ({
         </div>
       )}
 
-      {/* 6. General Markdown Content */}
+      {/* 6. Screen Vision & UI Guidance Widget (HeyClicky style) */}
+      {cardType === 'vision' && (
+        <div className="space-y-2.5">
+          {card.cardData?.preview_url && (
+            <div className="relative group rounded-xl overflow-hidden border border-white/15 bg-black/40 shadow-inner max-h-[220px]">
+              <img
+                src={card.cardData.preview_url}
+                alt="Captured Screen"
+                className="w-full h-auto object-cover opacity-90 group-hover:opacity-100 transition-opacity"
+              />
+              <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-black/70 backdrop-blur-md border border-white/10 text-[10px] text-zinc-300 font-medium">
+                <Eye className="w-3 h-3 text-cyan-400" />
+                <span>{card.cardData.active_window || 'Desktop'}</span>
+              </div>
+              {card.cardData?.pointer_target && (
+                <div
+                  className="absolute z-10 w-6 h-6 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                  style={{
+                    left: `${Math.min(100, Math.max(0, (card.cardData.pointer_target.x / (card.cardData.width || 1920)) * 100))}%`,
+                    top: `${Math.min(100, Math.max(0, (card.cardData.pointer_target.y / (card.cardData.height || 1080)) * 100))}%`,
+                  }}
+                >
+                  <span className="absolute inset-0 rounded-full bg-cyan-400/40 animate-ping" />
+                  <span className="relative flex items-center justify-center w-full h-full rounded-full bg-cyan-500 text-black shadow-lg">
+                    <Crosshair className="w-3.5 h-3.5" />
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {card.cardData?.pointer_target && onHighlight && (
+            <div className="flex items-center justify-between p-2 rounded-xl bg-cyan-950/20 border border-cyan-500/20">
+              <div className="flex items-center gap-2">
+                <Crosshair className="w-4 h-4 text-cyan-400 animate-pulse" />
+                <span className="text-xs text-cyan-200 font-medium">
+                  {card.cardData.label || 'Target Located'} ({card.cardData.pointer_target.x}, {card.cardData.pointer_target.y})
+                </span>
+              </div>
+              <button
+                onClick={() => onHighlight(card.cardData.pointer_target)}
+                className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-200 text-[11px] font-semibold transition cursor-pointer flex items-center gap-1"
+              >
+                <span>Point on Screen</span>
+              </button>
+            </div>
+          )}
+
+          {/* Analysis Markdown Content */}
+          <div className="mt-1 space-y-1 max-h-[220px] overflow-y-auto pr-1 select-text">
+            {renderMarkdown(card.displayText || card.spokenReply || '')}
+          </div>
+        </div>
+      )}
+
+      {/* 7. General Markdown Content */}
       {cardType === 'answer' && (
         <div className="mt-1 space-y-1 max-h-[280px] overflow-y-auto pr-1 select-text">
           {renderMarkdown(card.displayText || card.spokenReply || '')}

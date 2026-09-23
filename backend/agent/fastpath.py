@@ -84,8 +84,8 @@ class FastPathEngine:
 
         parsed_intents = AlexaIntentParser.parse(prompt)
         
-        # If any command requires LLM delegation, return None so planner can handle it
-        if any(p.get("action") == "delegate_llm" for p in parsed_intents):
+        # If any command requires LLM delegation or multimodal vision, return None so planner can handle it
+        if any(p.get("action") in ("delegate_llm", "screen_vision", "agent_mode") for p in parsed_intents):
             return None
 
         results = []
@@ -136,6 +136,33 @@ class FastPathEngine:
             elif action == "launch_app":
                 app_name = slots.get("app_name", "")
                 results.append(mcp_manager.execute("app_launcher.launch_app", {"app_name": app_name}))
+
+            elif action == "search_youtube":
+                q = slots.get("query", "").strip()
+                if not q:
+                    res = mcp_manager.execute("web.open_url", {"url": "https://www.youtube.com"})
+                    if res.get("success"):
+                        res["result"]["spoken_reply"] = "Opening YouTube for you."
+                else:
+                    res = mcp_manager.execute("web.search_youtube", {"query": q})
+                    if res.get("success"):
+                        res["result"]["spoken_reply"] = f"Opening {q} on YouTube for you."
+                results.append(res)
+
+            elif action == "search_google":
+                q = slots.get("query", "").strip()
+                res = mcp_manager.execute("web.search_google", {"query": q})
+                if res.get("success"):
+                    res["result"]["spoken_reply"] = f"Searching Google for {q}."
+                results.append(res)
+
+            elif action == "get_weather":
+                loc = slots.get("location", "").strip()
+                res = mcp_manager.execute("weather.get_current_weather", {"location": loc} if loc else {})
+                if res.get("success"):
+                    w_data = res.get("result", {})
+                    res["result"]["spoken_reply"] = w_data.get("summary") or f"Currently {w_data.get('temp_c')} degrees in {w_data.get('location')}."
+                results.append(res)
 
             elif action == "close_app":
                 app_name = slots.get("app_name", "").strip()

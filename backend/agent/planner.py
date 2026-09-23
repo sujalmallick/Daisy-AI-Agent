@@ -99,6 +99,48 @@ class DaisyAgenticPlanner:
                         elif res_data.get("message"):
                             spoken_reply = normalize_for_voice(res_data["message"])
 
+            card_type = "answer"
+            card_data = {}
+            display_text = spoken_reply
+
+            if results:
+                first = results[0]
+                res_data = first.get("result", {})
+                if isinstance(res_data, dict):
+                    if res_data.get("card_type"):
+                        card_type = res_data.get("card_type")
+                        card_data = res_data.get("card_data", {})
+                    elif first.get("tool", "").startswith("spotify."):
+                        card_type = "music"
+                        card_data = res_data
+                    elif first.get("tool", "").startswith("app_launcher."):
+                        card_type = "tool"
+                        card_data = res_data
+
+                    if res_data.get("spoken_reply"):
+                        spoken_reply = res_data["spoken_reply"]
+
+                    if card_type == "weather":
+                        w = card_data
+                        display_text = (
+                            f"### ⛅ Weather in {w.get('location', 'Current Location')}\n"
+                            f"**{w.get('temp_c')}°C** ({w.get('temp_f')}°F) • {w.get('condition')}\n\n"
+                            f"- **Feels Like:** {w.get('feels_like_c')}°C\n"
+                            f"- **Humidity:** {w.get('humidity')}%\n"
+                            f"- **Wind Speed:** {w.get('wind_speed_kmh')} km/h"
+                        )
+                    elif card_type == "youtube":
+                        yt_q = card_data.get("query") or "YouTube"
+                        display_text = f"▶️ Opened YouTube search for **{yt_q}** in your default browser."
+                    elif card_type == "web":
+                        g_q = card_data.get("query") or "Search"
+                        display_text = f"🔍 Opened Google search for **{g_q}** in your browser."
+                    elif card_type == "music" and res_data.get("track"):
+                        art = f" by {res_data.get('artist')}" if res_data.get("artist") else ""
+                        display_text = f"🎵 Playing **{res_data.get('track')}**{art} on Spotify."
+                    elif res_data.get("message"):
+                        display_text = res_data.get("message")
+
             should_exit = any(
                 isinstance(r.get("result"), dict) and (r.get("result", {}).get("should_exit") or r.get("result", {}).get("action") == "exit_app")
                 for r in results
@@ -111,31 +153,59 @@ class DaisyAgenticPlanner:
                 "source": "FASTPATH_LOCAL",
                 "tokens": 0,
                 "spoken_reply": spoken_reply,
+                "display_text": display_text,
+                "card_type": card_type,
+                "card_data": card_data,
                 "should_exit": should_exit,
                 "awaiting_confirmation": awaiting_confirmation,
                 "details": fast_result
             }
 
         # Step 2: Agentic LLM reasoning via Google Gemini
+        prompt_lower = user_prompt.lower()
+        is_screen_query = any(w in prompt_lower for w in [
+            "screen", "look at", "see this", "what is this", "what's this",
+            "looking at", "error on", "what does this say", "summarize this page",
+            "summarize this article", "explain this code", "where is", "where do i click",
+            "point to", "find on screen", "locate", "what window"
+        ])
+        is_agent_query = any(w in prompt_lower for w in ["agent", "agent mode", "research and", "organize", "investigate", "multi step"])
+
         if not self.api_key:
+            if is_screen_query:
+                from backend.mcp.servers.screen.server import screen_server
+                _, _, data_url, w, h = screen_server.take_screenshot(max_dim=1280)
+                win = screen_server._get_foreground_window_title()
+                return {
+                    "source": "LOCAL_VISION",
+                    "tokens": 0,
+                    "spoken_reply": f"I took a look at your screen. You are currently in {win}.",
+                    "display_text": f"### 👁️ Screen Captured\n- **Active Window:** `{win}`\n- **Display Resolution:** {w}×{h} px\n\n*(To enable Gemini Vision analysis of code, errors, and UI guidance, add your `GEMINI_API_KEY` to `.env`!)*",
+                    "card_type": "vision",
+                    "card_data": {
+                        "preview_url": data_url,
+                        "width": w,
+                        "height": h,
+                        "active_window": win
+                    }
+                }
             return {
                 "source": "LOCAL_ASSISTANT",
                 "tokens": 0,
-                "spoken_reply": "I'm here! Ask me to play a song, pause, skip, or change the volume.",
+                "spoken_reply": "I'm here! Ask me to play music, check the weather, open YouTube, or see your screen.",
                 "details": {"mode": "local_fallback", "prompt": user_prompt}
             }
-
 
         try:
             from google.genai import types
             from backend.hitl.manager import hitl_manager, RiskTier
+            from backend.mcp.servers.screen.server import screen_server
 
             client = self._get_client()
             if not client:
                 raise RuntimeError("Gemini client not initialized")
 
             # Dynamic tool pruning based on query intent to save prompt tokens
-            prompt_lower = user_prompt.lower()
             domains = []
             if any(w in prompt_lower for w in ["music", "song", "track", "play", "album", "artist", "spotify", "volume", "playlist", "vibe", "pause", "resume", "skip"]):
                 domains.append("media")
@@ -143,6 +213,14 @@ class DaisyAgenticPlanner:
                 domains.append("rag")
                 domains.append("desktop")
             if any(w in prompt_lower for w in ["open", "launch", "close", "app", "chrome", "notepad", "code", "calc", "window"]):
+                domains.append("desktop")
+            if any(w in prompt_lower for w in ["weather", "temperature", "forecast", "rain", "sunny", "hot", "cold", "outside"]):
+                domains.append("weather")
+            if any(w in prompt_lower for w in ["youtube", "video", "google", "web", "search", "browser", "internet", "website", "url"]):
+                domains.append("web")
+            if is_screen_query or is_agent_query:
+                domains.append("screen")
+                domains.append("web")
                 domains.append("desktop")
 
             tools_schema = mcp_manager.get_domain_tools_schema(domains if domains else None)
@@ -184,20 +262,42 @@ class DaisyAgenticPlanner:
             gemini_tools = [types.Tool(function_declarations=func_decls)] if func_decls else None
 
             system_instruction = (
-                "You are Daisy, a snappy desktop voice assistant. "
-                "You control Spotify, query desktop documents via RAG, and launch Windows apps. "
-                "CRITICAL VOICE RULE: Your spoken reply must be ONE concise, natural sentence, under 15 words. "
-                "No markdown, no bullet lists, no URLs, no citations. "
-                "Examples: 'Playing Starboy on Spotify.' / 'Your notes say the deadline is Friday.' / "
-                "'Closed Chrome.' / 'Found 2 items in your downloads.' "
-                "Execute the appropriate MCP tool calls when required."
+                "You are Daisy, an intelligent on-screen companion running locally on Windows, inspired by HeyClicky. "
+                "You control Spotify, search YouTube and Google, check live weather, inspect user screens, query desktop documents via RAG, and launch Windows apps. "
+                "SCREEN & VISUAL GUIDANCE: When a screen image is provided, you can see the user's active desktop/window. "
+                "If the user asks where something is or what to click, you can call screen_highlight_element with approximate coordinates and a label to visually guide the user. "
+                "VOICE SPEECH RULE: Keep the first sentence punchy and conversational for TTS audio playback. "
+                "For informational queries, explanations, and advice, provide a rich, well-structured response formatted with clean markdown, lists, and code blocks."
             )
 
-            # Bounded ReAct Execution Loop (max 3 iterations)
-            MAX_REACT_STEPS = 3
+            # Assemble Multimodal User Content
+            user_parts = []
+            screen_preview_url = None
+            active_win_title = None
+
+            if is_screen_query:
+                try:
+                    _, screen_path, screen_preview_url, sw, sh = screen_server.take_screenshot(max_dim=1280)
+                    active_win_title = screen_server._get_foreground_window_title()
+                    if screen_path and os.path.exists(screen_path):
+                        with open(screen_path, "rb") as sf:
+                            img_bytes = sf.read()
+                        user_parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"))
+                        user_parts.append(types.Part.from_text(
+                            text=f"[Live screen capture attached ({sw}x{sh} px). Active Window: '{active_win_title}']\nUser question: {user_prompt}"
+                        ))
+                except Exception as img_err:
+                    logger.warning(f"Could not attach screenshot to Gemini prompt: {img_err}")
+
+            if not user_parts:
+                user_parts.append(types.Part.from_text(text=user_prompt))
+
+            # Bounded ReAct Execution Loop (max 3 steps for standard, 6 for agent mode)
+            MAX_REACT_STEPS = 6 if is_agent_query else 3
             executed_tools = []
+            raw_text = ""
             spoken_text = ""
-            contents = [types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])]
+            contents = [types.Content(role="user", parts=user_parts)]
 
             for step in range(MAX_REACT_STEPS):
                 response = client.models.generate_content(
@@ -206,7 +306,7 @@ class DaisyAgenticPlanner:
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         temperature=0.3,
-                        max_output_tokens=80,
+                        max_output_tokens=600,
                         tools=gemini_tools
                     )
                 )
@@ -268,7 +368,8 @@ class DaisyAgenticPlanner:
                 else:
                     # Model produced final spoken answer
                     if hasattr(response, "text") and response.text:
-                        spoken_text = normalize_for_voice(response.text.strip())
+                        raw_text = response.text.strip()
+                        spoken_text = normalize_for_voice(raw_text)
                     break
 
             # Fallback formulation if model text was empty
@@ -290,12 +391,57 @@ class DaisyAgenticPlanner:
                 else:
                     spoken_text = "Done."
 
+            card_type = "answer"
+            card_data = {}
+            if executed_tools:
+                for ex in executed_tools:
+                    tool_res = ex.get("result", {})
+                    res_data = tool_res.get("result", {}) if isinstance(tool_res.get("result"), dict) else {}
+                    if isinstance(res_data, dict) and res_data.get("card_type"):
+                        card_type = res_data.get("card_type")
+                        card_data = res_data.get("card_data", {})
+                        break
+                    elif ex.get("name", "").startswith("spotify_"):
+                        card_type = "music"
+                        card_data = res_data
+                        break
+                    elif ex.get("name", "").startswith("web_"):
+                        card_type = "web"
+                        card_data = res_data
+                        break
+                    elif ex.get("name", "").startswith("weather_"):
+                        card_type = "weather"
+                        card_data = res_data
+                        break
+                    elif ex.get("name", "").startswith("app_launcher_"):
+                        card_type = "tool"
+                        card_data = res_data
+                        break
+                    elif ex.get("name", "").startswith("screen_"):
+                        card_type = "vision"
+                        card_data = res_data
+                        break
+
+            if is_screen_query and card_type in ("answer", "vision"):
+                card_type = "vision"
+                if not isinstance(card_data, dict):
+                    card_data = {}
+                if screen_preview_url and "preview_url" not in card_data:
+                    card_data["preview_url"] = screen_preview_url
+                if active_win_title and "active_window" not in card_data:
+                    card_data["active_window"] = active_win_title
+
+            display_text = raw_text or spoken_text
+
             return {
                 "source": "GEMINI_AGENTIC",
-                "tokens": 90,
+                "tokens": 120,
                 "spoken_reply": spoken_text,
+                "display_text": display_text,
+                "card_type": card_type,
+                "card_data": card_data,
                 "details": {
-                    "gemini_output": spoken_text,
+                    "gemini_output": raw_text or spoken_text,
                     "tools_executed": executed_tools
                 }
             }

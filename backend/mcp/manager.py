@@ -91,6 +91,12 @@ class MCPManager:
                 domain_prefixes.add("filesystem.")
             elif dl in ("custom",):
                 domain_prefixes.add("custom.")
+            elif dl in ("weather", "forecast"):
+                domain_prefixes.add("weather.")
+            elif dl in ("web", "browser", "search", "youtube"):
+                domain_prefixes.add("web.")
+            elif dl in ("screen", "vision", "display", "window", "cursor", "pointer"):
+                domain_prefixes.add("screen.")
             else:
                 domain_prefixes.add(f"{dl}.")
 
@@ -154,6 +160,9 @@ try:
     import backend.mcp.servers.filesystem.server
     import backend.mcp.servers.app_launcher.server
     import backend.mcp.servers.rag.server
+    import backend.mcp.servers.web.server
+    import backend.mcp.servers.weather.server
+    import backend.mcp.servers.screen.server
     from backend.mcp.custom_loader import custom_tool_manager
     custom_tool_manager.sync_into_mcp_manager()
 except Exception as _err:

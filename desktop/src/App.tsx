@@ -16,6 +16,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { DashboardView } from './components/DashboardView';
 import { ToastGlider } from './components/ToastGlider';
 import { ConversationCard, type ConversationCardData } from './components/ConversationCard';
+import { ScreenPointerOverlay, type PointerTarget } from './components/ScreenPointerOverlay';
 import { 
   resizeWidget, 
   restoreWidgetPosition, 
@@ -76,6 +77,8 @@ export function App() {
   const [activeCard, setActiveCard] = useState<ConversationCardData | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_conversationHistory, setConversationHistory] = useState<ConversationCardData[]>([]);
+  const [pointerTarget, setPointerTarget] = useState<PointerTarget | null>(null);
+  const isHoldingHotkeyRef = useRef<boolean>(false);
 
   // Derive if music is actively present
   const hasActiveTrack = Boolean(
@@ -426,6 +429,9 @@ export function App() {
             };
             setActiveCard(newCard);
             setConversationHistory(prev => [newCard, ...prev].slice(0, 20));
+            if (data.card_data?.pointer_target) {
+              setPointerTarget(data.card_data.pointer_target);
+            }
           }
 
           // Check if self-close / exit was triggered ("sayonara daisy", "go home daisy")
@@ -717,17 +723,40 @@ export function App() {
     });
   };
 
-  // Hotkey listener: Ctrl + Space
+  // Push-to-Talk Hotkey: Hold Ctrl + Space to speak, release to submit
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey && e.code === 'Space') || (e.code === 'Space' && (e.target as HTMLElement)?.tagName !== 'INPUT')) {
+      const isInput = (e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA';
+      if (isInput) return;
+
+      if ((e.ctrlKey && e.code === 'Space') || e.code === 'Space') {
         e.preventDefault();
-        startListeningDirect();
+        if (!isHoldingHotkeyRef.current) {
+          isHoldingHotkeyRef.current = true;
+          startListeningDirect();
+        }
       }
     };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const isInput = (e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA';
+      if (isInput) return;
+
+      if (e.code === 'Space' || (e.ctrlKey && e.code === 'Space')) {
+        if (isHoldingHotkeyRef.current) {
+          isHoldingHotkeyRef.current = false;
+          cancelDirectListeningTimeout();
+        }
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [startListeningDirect]);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [startListeningDirect, cancelDirectListeningTimeout]);
 
   // Poll Spotify playback: every 2.5s when active/expanded, every 5s when idle
   useEffect(() => {
@@ -1012,6 +1041,7 @@ export function App() {
                     card={activeCard}
                     onDismiss={() => setActiveCard(null)}
                     onSpeak={(text) => speakAloud(text)}
+                    onHighlight={(t) => setPointerTarget(t)}
                   />
                 </div>
               )}
@@ -1085,6 +1115,13 @@ export function App() {
                 >
                   <span>🌤</span>
                   <span>Weather Brief</span>
+                </button>
+                <button
+                  onClick={() => runVoiceFlow("what's on my screen", 'Analyzing active desktop screen...', true)}
+                  className="px-3.5 py-1.5 rounded-full bg-[#131722]/85 hover:bg-[#1b2234] border border-cyan-500/20 text-xs text-cyan-300 hover:text-white transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                >
+                  <span>👁️</span>
+                  <span>Look at Screen</span>
                 </button>
               </div>
             </div>
@@ -1256,6 +1293,7 @@ export function App() {
             card={activeCard}
             onDismiss={() => setActiveCard(null)}
             onSpeak={(text) => speakAloud(text)}
+            onHighlight={(t) => setPointerTarget(t)}
             compact={true}
           />
         </div>
@@ -1312,6 +1350,12 @@ export function App() {
         onOpenDashboard={() => setAppMode('dashboard')}
         appMode={appMode}
         onSetAppMode={(m) => setAppMode(m)}
+      />
+
+      {/* On-Screen Visual Pointer & Guidance Overlay (HeyClicky Beacon) */}
+      <ScreenPointerOverlay
+        target={pointerTarget}
+        onClear={() => setPointerTarget(null)}
       />
     </div>
   );

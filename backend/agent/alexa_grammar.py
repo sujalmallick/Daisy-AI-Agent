@@ -124,6 +124,77 @@ class AlexaIntentParser:
                     "tokens": 0
                 }
 
+        # YouTube Action Intent: "open lofi on youtube", "play interstellar on youtube", "search youtube for python"
+        if clean_lower in ["open youtube", "launch youtube", "go to youtube", "youtube"]:
+            return {
+                "intent": "Daisy.YouTubeIntent",
+                "action": "search_youtube",
+                "slots": {"query": ""},
+                "tokens": 0
+            }
+        yt_on_match = re.match(r"^(?:open|play|search|find)\s+(.+?)\s+(?:on|in)\s+youtube$", clean_lower, re.IGNORECASE)
+        yt_search_match = re.match(r"^(?:search\s+youtube\s+for|open\s+youtube\s+and\s+search(?:\s+for)?|youtube\s+search|youtube)\s+(.+)$", clean_lower, re.IGNORECASE)
+        yt_query = (yt_on_match.group(1) if yt_on_match else (yt_search_match.group(1) if yt_search_match else None))
+        if yt_query:
+            return {
+                "intent": "Daisy.YouTubeIntent",
+                "action": "search_youtube",
+                "slots": {"query": yt_query.strip()},
+                "tokens": 0
+            }
+
+        # Web Search Intent: "search google for ...", "google search ...", "google ..."
+        web_search_match = re.match(r"^(?:search\s+google\s+for|google\s+search|google|search\s+the\s+web\s+for|search\s+web\s+for)\s+(.+)$", clean_lower, re.IGNORECASE)
+        if web_search_match:
+            web_q = web_search_match.group(1).strip()
+            return {
+                "intent": "Daisy.WebSearchIntent",
+                "action": "search_google",
+                "slots": {"query": web_q},
+                "tokens": 0
+            }
+
+        # Live Weather Intent: "what's the weather", "weather in tokyo", "how's the weather"
+        weather_match = re.match(
+            r"^(?:what(?:s|\'s|\s+is)\s+the\s+weather(?:\s+like)?(?:\s+today|\s+outside)?(?:\s+(?:in|at|for)\s+(.+))?|weather(?:\s+today|\s+report|\s+brief)?(?:\s+(?:in|at|for)\s+(.+))?|how(?:s|\'s|\s+is)\s+the\s+weather(?:\s+(?:in|at|for)\s+(.+))?)$",
+            clean_lower,
+            re.IGNORECASE
+        )
+        if weather_match:
+            loc = weather_match.group(1) or weather_match.group(2) or weather_match.group(3)
+            return {
+                "intent": "Daisy.WeatherIntent",
+                "action": "get_weather",
+                "slots": {"location": loc.strip() if loc else ""},
+                "tokens": 0
+            }
+
+        # Screen Vision Intent: "look at my screen", "what's on my screen", "summarize my screen", "where is the [button]"
+        screen_vision_match = re.match(
+            r"^(?:look\s+at\s+(?:my\s+|this\s+)?screen|what(?:'s|\s+is)\s+(?:on\s+)?(?:my\s+|the\s+)?screen|see\s+(?:my\s+|this\s+)?screen|check\s+(?:my\s+|this\s+)?screen|what\s+am\s+i\s+looking\s+at|summarize\s+(?:my\s+|this\s+)?screen|explain\s+(?:my\s+|this\s+)?screen|what\s+window\s+is\s+this|what\s+is\s+this\s+error|look\s+at\s+this(?:\s+error|\s+code|\s+page)?|where\s+(?:is|do\s+i\s+click)\s+(?:the\s+)?(.+)|point\s+to\s+(?:the\s+)?(.+)|find\s+(.+?)\s+on\s+(?:my\s+|the\s+)?screen)$",
+            clean_lower,
+            re.IGNORECASE
+        )
+        if screen_vision_match:
+            target = screen_vision_match.group(1) or screen_vision_match.group(2) or screen_vision_match.group(3) or ""
+            return {
+                "intent": "Daisy.ScreenVisionIntent",
+                "action": "screen_vision",
+                "slots": {"target": target.strip(), "query": clean},
+                "tokens": 0
+            }
+
+        # Agent Mode Intent: "daisy agent [task]", "agent mode [task]"
+        agent_match = re.match(r"^(?:daisy\s+agent|agent\s+mode|agent)\s+(.+)$", clean_lower, re.IGNORECASE)
+        if agent_match:
+            task = agent_match.group(1).strip()
+            return {
+                "intent": "Daisy.AgentModeIntent",
+                "action": "agent_mode",
+                "slots": {"task": task},
+                "tokens": 0
+            }
+
         # App Launch Intent: "open Spotify", "launch VS Code", "open Chrome", "start Notepad", "open calculator"
         app_match = re.match(r"^(?:open|launch|start|run)\s+(?:up\s+)?(.+)$", clean_lower, re.IGNORECASE)
         if app_match:
@@ -144,13 +215,13 @@ class AlexaIntentParser:
         )
         if rag_query_match:
             g = rag_query_match.groups()
-            doc = g[0] or g[2] or g[4]
-            q = g[1] or g[3] or g[5]
-            if doc and q:
+            doc = (g[0] or g[2] or g[4] or "").strip()
+            q = (g[1] or g[3] or g[5] or "").strip()
+            if doc and q and doc.lower() not in ["youtube", "google", "web", "internet", "spotify"]:
                 return {
                     "intent": "Daisy.DocumentQueryIntent",
                     "action": "query_document",
-                    "slots": {"doc_name": doc.strip(), "query": q.strip()},
+                    "slots": {"doc_name": doc, "query": q},
                     "tokens": 0
                 }
 
@@ -162,7 +233,7 @@ class AlexaIntentParser:
         )
         if rag_sum_match:
             doc = rag_sum_match.group(1).strip()
-            if doc and doc not in ["music", "song", "track", "playback"]:
+            if doc and doc not in ["music", "song", "track", "playback", "youtube", "google"]:
                 return {
                     "intent": "Daisy.DocumentSummarizeIntent",
                     "action": "summarize_document",
