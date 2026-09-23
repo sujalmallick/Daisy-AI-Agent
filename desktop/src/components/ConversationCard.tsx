@@ -397,15 +397,31 @@ export const ConversationCard: React.FC<ConversationCardProps> = ({
       {/* 4. Spotify Music Widget */}
       {cardType === 'music' && card.cardData && (
         <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-950/20 to-black/40 border border-emerald-500/20 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-900/30 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-            <Music className="w-5 h-5" />
+          {/* Album Artwork Image Thumbnail or Fallback Icon */}
+          <div className="relative w-11 h-11 rounded-lg bg-emerald-900/30 border border-emerald-500/30 flex items-center justify-center overflow-hidden shrink-0 shadow-md">
+            {(card.cardData.artwork_url || card.cardData.artworkUrl) ? (
+              <img
+                src={card.cardData.artwork_url || card.cardData.artworkUrl}
+                alt={card.cardData.track || 'Track artwork'}
+                className="w-full h-full object-cover"
+                loading="eager"
+                onError={(e) => {
+                  (e.currentTarget as HTMLElement).style.display = 'none';
+                  const fallback = e.currentTarget.parentElement?.querySelector('.fallback-music-icon');
+                  if (fallback) fallback.classList.remove('hidden');
+                }}
+              />
+            ) : null}
+            <div className={`fallback-music-icon ${card.cardData.artwork_url || card.cardData.artworkUrl ? 'hidden' : ''} flex items-center justify-center`}>
+              <Music className="w-5 h-5 text-emerald-400" />
+            </div>
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-xs font-semibold text-white truncate">
               {card.cardData.track || 'Spotify Playback'}
             </div>
             <div className="text-[11px] text-zinc-400 truncate">
-              {card.cardData.artist || 'Active Track'}
+              {card.cardData.artist || 'Active Track'}{card.cardData.album ? ` • ${card.cardData.album}` : ''}
             </div>
           </div>
           <div className="flex items-center gap-0.5">

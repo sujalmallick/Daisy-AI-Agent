@@ -458,10 +458,37 @@ export function App() {
       unduckPlayback();
     }
 
-    // If playback command, refresh immediately and reveal music player
-    fetchLivePlayback(true);
-    if (data.source === 'spotify' || (prompt && /(play|music|song|spotify|resume|track)/i.test(prompt))) {
+    // If playback command, update playback state immediately with track info & artwork so compact player appears with 0ms delay!
+    const isMusic = data.card_type === 'music' || data.source === 'spotify' || (prompt && /(play|music|song|spotify|resume|track)/i.test(prompt));
+    if (isMusic) {
       setIsPlayerTucked(false);
+      if (data.card_data && (data.card_data.track || data.card_data.title)) {
+        const trackTitle = data.card_data.track || data.card_data.title;
+        const trackArtist = data.card_data.artist || '';
+        const artworkUrl = data.card_data.artwork_url || data.card_data.artworkUrl || null;
+        const durationMs = data.card_data.duration_ms || 0;
+
+        setPlayback((prev) => {
+          const next: PlaybackState = {
+            ...prev,
+            isPlaying: true,
+            trackTitle,
+            trackArtist: trackArtist + (data.card_data.album ? ` • ${data.card_data.album}` : ''),
+            artworkUrl: artworkUrl || prev.artworkUrl,
+            durationMs: durationMs || prev.durationMs,
+            progressMs: 0,
+          };
+          try {
+            localStorage.setItem('daisy_last_playback', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+      }
+      // Staggered background polls to allow Spotify Connect cloud state to sync
+      setTimeout(() => fetchLivePlayback(true), 600);
+      setTimeout(() => fetchLivePlayback(true), 1800);
+    } else {
+      fetchLivePlayback(true);
     }
   }, [showToast, speakAloud, fetchLivePlayback, unduckPlayback]);
 
@@ -1342,8 +1369,25 @@ export function App() {
             isAmbientListening={isAmbientListening}
             assistantName={assistantName}
             isQuickInputOpen={showQuickInput}
-            isToastVisible={toastVisible}
-            onToggleMusic={() => setIsPlayerTucked((prev) => !prev)}
+            onToggleMusic={() => {
+              if (!hasActiveTrack) {
+                setPlayback((prev) => {
+                  const next: PlaybackState = {
+                    ...prev,
+                    trackTitle: prev.trackTitle || 'Spotify Music',
+                    trackArtist: prev.trackArtist || 'Ready to play',
+                  };
+                  try {
+                    localStorage.setItem('daisy_last_playback', JSON.stringify(next));
+                  } catch {}
+                  return next;
+                });
+                setIsPlayerTucked(false);
+                fetchLivePlayback(false);
+              } else {
+                setIsPlayerTucked((prev) => !prev);
+              }
+            }}
             isMusicActive={hasActiveTrack}
             isPlayerTucked={isPlayerTucked}
           />

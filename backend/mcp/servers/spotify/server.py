@@ -21,6 +21,7 @@ class SpotifyMCPServer:
         self.auth_manager = None
         self._last_network_error_time = 0
         self._saved_pre_duck_volume = None
+        self._last_known_track_info: Dict[str, Any] = {}
         self._init_client()
 
     def _init_client(self):
@@ -291,6 +292,11 @@ class SpotifyMCPServer:
                 if tracks:
                     track = tracks[0]
                     track_uri = track.get("uri", "")
+                    album_obj = track.get("album") or {}
+                    images = album_obj.get("images") or []
+                    artwork_url = images[0].get("url") if images else None
+                    artist_name = track["artists"][0]["name"] if track.get("artists") else "Unknown"
+                    album_name = album_obj.get("name", "")
 
                     # Pure Spotify Connect Web API playback (background streaming without opening the desktop GUI app)
                     try:
@@ -306,11 +312,25 @@ class SpotifyMCPServer:
                         if sys.platform == "win32":
                             self._dispatch_media_key(0xB3)  # Fallback to local media key only if Web API fails
 
+                    # Cache track info so compact player & conversation card immediately show full metadata & artwork
+                    self._last_known_track_info = {
+                        "track": track["name"],
+                        "artist": artist_name,
+                        "album": album_name,
+                        "artwork_url": artwork_url,
+                        "duration_ms": track.get("duration_ms", 0),
+                        "uri": track_uri,
+                    }
+
                     return {
                         "status": "playing",
                         "track": track["name"],
-                        "artist": track["artists"][0]["name"],
-                        "message": f"Now playing: {track['name']} by {track['artists'][0]['name']}"
+                        "artist": artist_name,
+                        "album": album_name,
+                        "artwork_url": artwork_url,
+                        "duration_ms": track.get("duration_ms", 0),
+                        "uri": track_uri,
+                        "message": f"Now playing: {track['name']} by {artist_name}"
                     }
                 return {"error": f"Couldn't find any track matching '{q}'."}
 
@@ -321,6 +341,9 @@ class SpotifyMCPServer:
                 if items:
                     alb = items[0]
                     alb_uri = alb.get("uri", "")
+                    alb_images = alb.get("images") or []
+                    alb_art = alb_images[0].get("url") if alb_images else None
+                    alb_artists = ", ".join(a["name"] for a in alb.get("artists", [])) if alb.get("artists") else "Spotify"
 
                     try:
                         if target_device_id:
@@ -335,7 +358,23 @@ class SpotifyMCPServer:
                         if sys.platform == "win32":
                             self._dispatch_media_key(0xB3)
 
-                    return {"status": "playing_album", "album": alb["name"], "message": f"Playing album: {alb['name']}"}
+                    self._last_known_track_info = {
+                        "track": alb["name"],
+                        "artist": alb_artists,
+                        "album": alb["name"],
+                        "artwork_url": alb_art,
+                        "duration_ms": 0,
+                        "uri": alb_uri,
+                    }
+
+                    return {
+                        "status": "playing_album",
+                        "album": alb["name"],
+                        "track": alb["name"],
+                        "artist": alb_artists,
+                        "artwork_url": alb_art,
+                        "message": f"Playing album: {alb['name']}"
+                    }
                 return {"error": f"Album '{album}' not found."}
 
             elif tool_name == "pause":
@@ -360,20 +399,22 @@ class SpotifyMCPServer:
 
                 if not resumed:
                     self._dispatch_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
+
+                # If no item is playing in Spotify, resume last known track uri if available
+                if not resumed and self._last_known_track_info.get("uri"):
                     try:
-                        import subprocess
-                        subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
+                        self.sp.start_playback(device_id=target_device_id, uris=[self._last_known_track_info["uri"]])
+                        resumed = True
                     except Exception:
                         pass
 
-                    # If Spotify has no track loaded in queue at all, auto-play popular music
-                    try:
-                        pb = self.sp.current_playback()
-                        if not pb or not pb.get("item"):
-                            return self.execute_tool("play", {"query": "top hits"})
-                    except Exception:
-                        pass
-                return {"status": "resumed", "message": "Playback resumed."}
+                return {
+                    "status": "resumed",
+                    "track": self._last_known_track_info.get("track"),
+                    "artist": self._last_known_track_info.get("artist"),
+                    "artwork_url": self._last_known_track_info.get("artwork_url"),
+                    "message": "Playback resumed."
+                }
 
             elif tool_name == "next_track":
                 skipped = False
@@ -449,6 +490,14 @@ class SpotifyMCPServer:
                     item = pb["item"]
                     dev = pb.get("device") or {}
                     artists = ", ".join(a["name"] for a in item.get("artists", [])) or item["artists"][0]["name"]
+                    artwork_url = item["album"]["images"][0]["url"] if item["album"]["images"] else None
+                    self._last_known_track_info = {
+                        "track": item["name"],
+                        "artist": artists,
+                        "album": item["album"]["name"],
+                        "artwork_url": artwork_url,
+                        "duration_ms": item.get("duration_ms", 0),
+                    }
                     return {
                         "is_playing": pb.get("is_playing", False),
                         "track": item["name"],
@@ -456,7 +505,7 @@ class SpotifyMCPServer:
                         "album": item["album"]["name"],
                         "progress_ms": pb.get("progress_ms", 0),
                         "duration_ms": item.get("duration_ms", 0),
-                        "artwork_url": item["album"]["images"][0]["url"] if item["album"]["images"] else None,
+                        "artwork_url": artwork_url,
                         "device_name": dev.get("name", "Spotify Device"),
                         "device_type": dev.get("type", "Speaker"),
                         "volume_percent": dev.get("volume_percent", 70),
@@ -468,6 +517,19 @@ class SpotifyMCPServer:
                 except Exception:
                     devices = []
                 active_dev = next((d for d in devices if d.get("is_active")), devices[0] if devices else None)
+                if self._last_known_track_info.get("track"):
+                    return {
+                        "is_playing": False,
+                        "track": self._last_known_track_info.get("track"),
+                        "artist": self._last_known_track_info.get("artist"),
+                        "album": self._last_known_track_info.get("album"),
+                        "artwork_url": self._last_known_track_info.get("artwork_url"),
+                        "duration_ms": self._last_known_track_info.get("duration_ms", 0),
+                        "progress_ms": 0,
+                        "message": "Playback paused.",
+                        "device_name": active_dev.get("name") if active_dev else "Spotify Device",
+                        "volume_percent": active_dev.get("volume_percent", 50) if active_dev else 50
+                    }
                 return {
                     "is_playing": False,
                     "message": "No active playback.",
@@ -481,14 +543,6 @@ class SpotifyMCPServer:
                 recs = self.sp.recommendations(seed_genres=chosen, limit=20)
                 uris = [t["uri"] for t in recs["tracks"]]
 
-                import sys
-                if sys.platform == "win32" and uris:
-                    try:
-                        import subprocess
-                        subprocess.Popen(["cmd", "/c", "start", "", f"{uris[0]}:play"], shell=True)
-                    except Exception:
-                        pass
-
                 try:
                     if target_device_id:
                         try:
@@ -498,9 +552,6 @@ class SpotifyMCPServer:
                     self.sp.start_playback(device_id=target_device_id, uris=uris)
                 except Exception as web_err:
                     logger.debug(f"Web API vibe playback note: {web_err}")
-
-                if sys.platform == "win32":
-                    self._dispatch_media_key(0xB3)
 
                 return {
                     "status": "vibe_started",
