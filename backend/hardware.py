@@ -33,14 +33,24 @@ def detect_hardware_tier() -> dict:
             res = subprocess.run([smi, "--query-gpu=name,driver_version", "--format=csv,noheader"], capture_output=True, text=True, timeout=3)
             if res.returncode == 0 and res.stdout.strip():
                 gpu_name = res.stdout.strip().split(",")[0].strip()
-                return {
-                    "tier": 1,
-                    "tier_name": "CUDA_GPU",
-                    "device": "cuda",
-                    "compute_type": "float16",
-                    "description": f"NVIDIA GPU detected: {gpu_name}",
-                    "gpu_name": gpu_name
-                }
+                # Verify that CUDA runtime libraries (cublas64_12.dll) can actually be loaded
+                cuda_runtime_available = False
+                try:
+                    import ctypes
+                    ctypes.cdll.LoadLibrary("cublas64_12.dll")
+                    cuda_runtime_available = True
+                except Exception:
+                    cuda_runtime_available = False
+
+                if cuda_runtime_available:
+                    return {
+                        "tier": 1,
+                        "tier_name": "CUDA_GPU",
+                        "device": "cuda",
+                        "compute_type": "float16",
+                        "description": f"NVIDIA GPU detected: {gpu_name}",
+                        "gpu_name": gpu_name
+                    }
     except Exception:
         pass
 

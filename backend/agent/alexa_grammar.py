@@ -18,7 +18,21 @@ class AlexaIntentParser:
 
     PATTERNS = [
         ("AMAZON.PauseIntent", re.compile(r"^(pause|stop|halt|hold\s+up|quiet|shut\s+up|hush|be\s+quiet|(?:pause|stop)(?:\s+the)?(?:\s+music|\s+song|\s+playback|\s+track)?)$", re.IGNORECASE)),
-        ("AMAZON.ResumeIntent", re.compile(r"^(resume|continue|unpause|keep\s+playing|start\s+playing|(?:resume|continue|unpause|start|play)(?:\s+the)?(?:\s+music|\s+song|\s+playback|\s+track)?)$", re.IGNORECASE)),
+        (
+            "AMAZON.ResumeIntent",
+            re.compile(
+                r"^(?:resume|continue|unpause|keep\s+playing|start\s+playing|"
+                r"(?:resume|continue|unpause|start|start\s+playing|play|put\s+on|turn\s+on)"
+                r"(?:\s+(?:the|a|some|any|me|me\s+some))?"
+                r"(?:\s+(?:music|song|songs|playback|track|tracks|tunes|something))?"
+                r"(?:\s+(?:for\s+me|on\s+spotify))?"
+                r"|(?:listen\s+to|hear)\s+(?:the\s+|a\s+|some\s+)?(?:music|songs|tunes)"
+                r"|i\s+want\s+(?:to\s+listen\s+to|some)\s+music"
+                r"|put\s+(?:the|some|a)?\s*music\s+on"
+                r")$",
+                re.IGNORECASE
+            )
+        ),
         ("AMAZON.NextIntent", re.compile(r"^(next|skip|forward|(?:play\s+)?next(?:\s+song|\s+track)?|skip(?:\s+this)?(?:\s+song|\s+track)?|change(?:\s+the)?(?:\s+song|\s+track))$", re.IGNORECASE)),
         ("AMAZON.PreviousIntent", re.compile(r"^(previous|prev|back|go\s+back|(?:play\s+)?previous(?:\s+song|\s+track)?|(?:play\s+)?last(?:\s+song|\s+track)?)$", re.IGNORECASE)),
         ("AMAZON.VolumeIntent", re.compile(r"^(volume\s+(?:up|down|\d+)|turn\s+it\s+(?:up|down)|turn\s+up\s+the\s+volume|turn\s+down\s+the\s+volume|set\s+volume\s+to\s+(\d+)|mute|unmute|louder|make\s+it\s+louder|quieter|make\s+it\s+quieter)$", re.IGNORECASE)),
@@ -36,10 +50,31 @@ class AlexaIntentParser:
         wakes = list(set([re.escape(cls.wake_word.lower()), "daisy"]))
         pattern = rf"^(?:hey\s+|ok\s+|hi\s+|hello\s+)?(?:{'|'.join(wakes)})\s*[,:\s]*"
         clean = re.sub(pattern, "", clean, flags=re.IGNORECASE).strip()
-        # Strip leading courtesies e.g. "can you", "could you", "would you", "please"
-        clean = re.sub(r"^(?:can\s+you\s+|could\s+you\s+|would\s+you\s+|please\s+)", "", clean, flags=re.IGNORECASE).strip()
-        # Strip trailing courtesies e.g. "please", "thanks", "thank you"
-        clean = re.sub(r"(?:\s+please|\s+thanks|\s+thank\s+you)$", "", clean, flags=re.IGNORECASE).strip()
+
+        # Iteratively strip combinations of leading courtesy phrases
+        leading_courtesies = re.compile(
+            r"^(?:can\s+you|could\s+you|would\s+you|will\s+you|can\s+we|can\s+i|please|kindly|just|help\s+me|i\s+want\s+you\s+to|i\s+want\s+to|go\s+ahead\s+and|let\'s|lets)\s+",
+            re.IGNORECASE
+        )
+        while True:
+            m = leading_courtesies.match(clean)
+            if m:
+                clean = clean[m.end():].strip()
+            else:
+                break
+
+        # Iteratively strip combinations of trailing courtesy words
+        trailing_courtesies = re.compile(
+            r"\s+(?:please|thanks|thank\s+you|for\s+me|right\s+now|now)$",
+            re.IGNORECASE
+        )
+        while True:
+            m = trailing_courtesies.search(clean)
+            if m:
+                clean = clean[:m.start()].strip()
+            else:
+                break
+
         return clean.strip("?!.,;\"'")
 
     @classmethod
@@ -199,13 +234,17 @@ class AlexaIntentParser:
         app_match = re.match(r"^(?:open|launch|start|run)\s+(?:up\s+)?(.+)$", clean_lower, re.IGNORECASE)
         if app_match:
             app_target = app_match.group(1).strip()
-            if app_target not in ["music", "song", "track", "playing"]:
-                return {
-                    "intent": "Daisy.AppLaunchIntent",
-                    "action": "launch_app",
-                    "slots": {"app_name": app_target},
-                    "tokens": 0
-                }
+            clean_target = re.sub(r"^(?:the|a|some)\s+", "", app_target).strip()
+            if clean_target in ["music", "song", "songs", "track", "tracks", "playback", "playing", "playing music", "tunes"]:
+                return {"intent": "AMAZON.ResumeIntent", "action": "resume", "slots": {}, "tokens": 0}
+            if app_target in ["daisy", "yourself", "assistant", "app", "this app", "the app", "window"]:
+                return {"intent": "Daisy.AppCloseIntent", "action": "close_app", "slots": {"app_name": "Daisy"}, "tokens": 0}
+            return {
+                "intent": "Daisy.AppLaunchIntent",
+                "action": "launch_app",
+                "slots": {"app_name": app_target},
+                "tokens": 0
+            }
 
         # Document Query Intent: "what does my resume say about Python", "search notes for project deadlines"
         rag_query_match = re.match(
@@ -265,6 +304,19 @@ class AlexaIntentParser:
             # Handle PlayMusicIntent slots
             elif intent_name == "PlayMusicIntent":
                 query = match.group(1).strip()
+                # Clean filler words from the query e.g. "play some lofi" -> "lofi", "play me a song" -> "song"
+                query = re.sub(r"^(?:some|a|any|me\s+some|me\s+a|me)\s+", "", query, flags=re.IGNORECASE).strip()
+                query = re.sub(r"\s+(?:for\s+me|on\s+spotify)$", "", query, flags=re.IGNORECASE).strip()
+
+                # If the query itself was just generic music after stripping, route to ResumeIntent
+                if query.lower() in ("", "music", "song", "songs", "track", "tracks", "tunes", "something"):
+                    return {
+                        "intent": "AMAZON.ResumeIntent",
+                        "action": "resume",
+                        "slots": {},
+                        "tokens": 0
+                    }
+
                 # Check for "play <track> by <artist>"
                 by_match = re.match(r"^(.+?)\s+by\s+(.+)$", query, re.IGNORECASE)
                 if by_match:

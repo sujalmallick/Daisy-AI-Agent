@@ -397,6 +397,14 @@ class SpotifyMCPServer:
                         subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
                     except Exception:
                         pass
+
+                    # If Spotify has no track loaded in queue at all, auto-play popular music
+                    try:
+                        pb = self.sp.current_playback()
+                        if not pb or not pb.get("item"):
+                            return self.execute_tool("play", {"query": "top hits"})
+                    except Exception:
+                        pass
                 return {"status": "resumed", "message": "Playback resumed."}
 
             elif tool_name == "next_track":
