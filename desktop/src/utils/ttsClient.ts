@@ -25,11 +25,36 @@ class TTSClient {
   private abortController: AbortController | null = null;
   private _isSpeaking = false;
   private cachedVoices: SpeechSynthesisVoice[] = [];
+  private cachedConfig: { provider?: string } | null = null;
+  private lastConfigFetchTime = 0;
   /** Text currently being spoken — used by echo filter */
   public currentSpokenText = '';
 
   constructor() {
     this._initVoices();
+  }
+
+  public invalidateConfigCache(): void {
+    this.cachedConfig = null;
+    this.lastConfigFetchTime = 0;
+  }
+
+  private async _getConfig(): Promise<{ provider?: string } | null> {
+    const now = Date.now();
+    if (this.cachedConfig && now - this.lastConfigFetchTime < 30000) {
+      return this.cachedConfig;
+    }
+    try {
+      const cfgRes = await fetch(`${BACKEND}/voice/config`);
+      if (cfgRes.ok) {
+        this.cachedConfig = await cfgRes.json();
+        this.lastConfigFetchTime = now;
+        return this.cachedConfig;
+      }
+    } catch {
+      // Backend not reachable
+    }
+    return this.cachedConfig;
   }
 
   private _initVoices(): void {
@@ -60,11 +85,11 @@ class TTSClient {
       this.abortController = null;
     }
 
-    // Pause and reset audio element
+    // Pause and reset audio element immediately
     if (this.audio) {
       try {
         this.audio.pause();
-        this.audio.src = '';
+        this.audio.removeAttribute('src');
         this.audio.load();
       } catch {
         // Ignore errors on teardown
@@ -72,7 +97,7 @@ class TTSClient {
       this.audio = null;
     }
 
-    // Revoke the blob URL to free memory
+    // Revoke any blob URL to free memory
     if (this.currentObjectUrl) {
       URL.revokeObjectURL(this.currentObjectUrl);
       this.currentObjectUrl = null;
@@ -110,23 +135,16 @@ class TTSClient {
     this._isSpeaking = true;
     this.currentSpokenText = clean;
 
-    // Check provider config first — if disabled, fire onEnd immediately
-    try {
-      const cfgRes = await fetch(`${BACKEND}/voice/config`);
-      if (cfgRes.ok) {
-        const cfg = await cfgRes.json();
-        if (cfg.provider === 'disabled') {
-          this._isSpeaking = false;
-          this.currentSpokenText = '';
-          onEnd?.();
-          return;
-        }
-      }
-    } catch {
-      // Backend not reachable, fall through to Web Speech fallback
+    // Check cached provider config first — if disabled, fire onEnd immediately
+    const cfg = await this._getConfig();
+    if (cfg?.provider === 'disabled') {
+      this._isSpeaking = false;
+      this.currentSpokenText = '';
+      onEnd?.();
+      return;
     }
 
-    // Attempt to synthesize from backend
+    // Attempt streaming synthesis from backend
     const synthesized = await this._synthesizeFromBackend(clean, options);
     if (!synthesized) {
       // Fallback to Web Speech API
@@ -139,33 +157,22 @@ class TTSClient {
 
     try {
       this.abortController = new AbortController();
-      const url = `${BACKEND}/voice/synthesize?text=${encodeURIComponent(text)}`;
+      const streamUrl = `${BACKEND}/voice/synthesize/stream?text=${encodeURIComponent(text)}`;
 
-      const res = await fetch(url, { signal: this.abortController.signal });
-
-      if (!res.ok || res.status === 204) {
-        // 204 = disabled or synthesis failure
-        this._isSpeaking = false;
-        this.currentSpokenText = '';
-        onEnd?.();
-        return true; // "Handled" — don't fallback to web speech for disabled state
-      }
-
-      const blob = await res.blob();
-      if (!blob || blob.size === 0) {
-        return false;
-      }
-
-      this.abortController = null;
-      const objectUrl = URL.createObjectURL(blob);
-      this.currentObjectUrl = objectUrl;
-
-      const audio = new Audio(objectUrl);
+      const audio = new Audio();
       this.audio = audio;
 
-      audio.onplay = () => {
-        onStart?.();
+      let started = false;
+      const triggerStart = () => {
+        if (!started) {
+          started = true;
+          this._isSpeaking = true;
+          onStart?.();
+        }
       };
+
+      audio.onplay = triggerStart;
+      audio.onplaying = triggerStart;
 
       audio.onended = () => {
         this._cleanup();
@@ -178,7 +185,11 @@ class TTSClient {
         onEnd?.();
       };
 
-      await audio.play();
+      audio.src = streamUrl;
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        await playPromise;
+      }
       return true;
 
     } catch (err: unknown) {
@@ -188,6 +199,7 @@ class TTSClient {
         this.currentSpokenText = '';
         return true;
       }
+      this._cleanup();
       return false;
     }
   }

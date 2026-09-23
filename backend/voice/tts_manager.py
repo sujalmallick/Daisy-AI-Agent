@@ -37,7 +37,7 @@ _CONFIG_FILE = _CONFIG_DIR / "voice_config.json"
 # ── Defaults ───────────────────────────────────────────────────────────────────
 DEFAULT_CONFIG: Dict[str, Any] = {
     "provider": "edge-tts",          # "edge-tts" | "windows-tts" | "disabled"
-    "voice": "en-US-JennyNeural",    # Edge voice (persistent)
+    "voice": "en-US-AvaNeural",      # Edge voice (persistent)
     "windows_voice": "Microsoft Zira Desktop",  # Windows SAPI voice
     "rate": 1.05,
     "pitch": 1.02,
@@ -46,6 +46,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 # ── Available voice catalogs ───────────────────────────────────────────────────
 EDGE_TTS_VOICES: List[Dict[str, str]] = [
+    {"name": "en-US-AvaNeural",      "label": "Ava (US Warm Female, Neural)"},
+    {"name": "en-US-EmmaNeural",     "label": "Emma (US Conversational Female, Neural)"},
     {"name": "en-US-JennyNeural",    "label": "Jenny (US Female, Neural)"},
     {"name": "en-US-GuyNeural",      "label": "Guy (US Male, Neural)"},
     {"name": "en-US-AriaNeural",     "label": "Aria (US Female, Neural)"},
@@ -133,11 +135,44 @@ class TTSManager:
 
     @property
     def voice(self) -> str:
-        return self._config.get("voice", "en-US-JennyNeural")
+        return self._config.get("voice", "en-US-AvaNeural")
 
     @property
     def windows_voice(self) -> str:
         return self._config.get("windows_voice", "Microsoft Zira Desktop")
+
+    @property
+    def rate(self) -> float:
+        return self._config.get("rate", 1.05)
+
+    @property
+    def pitch(self) -> float:
+        return self._config.get("pitch", 1.02)
+
+    @property
+    def is_speaking(self) -> bool:
+        with self._lock:
+            return getattr(self, "_is_speaking_state", False) or (self._active_proc is not None)
+
+    @staticmethod
+    def _format_rate(rate: Any) -> str:
+        if isinstance(rate, str):
+            return rate if rate.endswith("%") else f"{rate}%"
+        try:
+            pct = int(round((float(rate) - 1.0) * 100))
+            return f"{pct:+d}%"
+        except Exception:
+            return "+0%"
+
+    @staticmethod
+    def _format_pitch(pitch: Any) -> str:
+        if isinstance(pitch, str):
+            return pitch if pitch.endswith("Hz") else f"{pitch}Hz"
+        try:
+            hz = int(round((float(pitch) - 1.0) * 100))
+            return f"{hz:+d}Hz"
+        except Exception:
+            return "+0Hz"
 
     # ── Stop / Barge-In ───────────────────────────────────────────────────────
 
@@ -159,6 +194,47 @@ class TTSManager:
         self._stop_event.clear()
 
     # ── Synthesis ─────────────────────────────────────────────────────────────
+
+    async def stream_chunks(self, text: str):
+        """
+        Asynchronously yield MP3 audio chunks as they arrive from edge_tts.
+        Enables streaming audio playback in the browser for sub-200ms time-to-first-audio-byte.
+        """
+        import re
+        text = re.sub(r"https?://\S+", "", text)
+        text = re.sub(r"[*_#`~]", "", text)
+        text = text.strip()
+        if not text:
+            return
+
+        if self.provider == "disabled":
+            return
+
+        if self.provider == "edge-tts":
+            try:
+                import edge_tts
+                voice = self.voice
+                rate_str = self._format_rate(self.rate)
+                pitch_str = self._format_pitch(self.pitch)
+                communicate = edge_tts.Communicate(text, voice=voice, rate=rate_str, pitch=pitch_str)
+                async for chunk in communicate.stream():
+                    if self._stop_event.is_set():
+                        break
+                    if chunk["type"] == "audio" and chunk.get("data"):
+                        yield chunk["data"]
+                return
+            except Exception as e:
+                logger.warning(f"[TTS] stream_chunks Edge-TTS failed: {e}")
+
+        # Fallback to whole buffer synthesis
+        res = await asyncio.to_thread(self.synthesize_to_bytes, text)
+        if res:
+            audio_bytes, _ = res
+            chunk_size = 4096
+            for i in range(0, len(audio_bytes), chunk_size):
+                if self._stop_event.is_set():
+                    break
+                yield audio_bytes[i:i + chunk_size]
 
     def synthesize_to_bytes(self, text: str) -> Optional[Tuple[bytes, str]]:
         """
@@ -197,7 +273,9 @@ class TTSManager:
 
             async def _run() -> bytes:
                 voice = self.voice
-                communicate = edge_tts.Communicate(text, voice=voice)
+                rate_str = self._format_rate(self.rate)
+                pitch_str = self._format_pitch(self.pitch)
+                communicate = edge_tts.Communicate(text, voice=voice, rate=rate_str, pitch=pitch_str)
                 buf = bytearray()
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
@@ -283,12 +361,18 @@ class TTSManager:
         if self._stop_event.is_set():
             return
 
-        provider = self.provider
+        with self._lock:
+            self._is_speaking_state = True
+        try:
+            provider = self.provider
 
-        if provider == "edge-tts":
-            self._play_edge_tts(text)
-        elif provider == "windows-tts":
-            self._play_windows_tts_direct(text)
+            if provider == "edge-tts":
+                self._play_edge_tts(text)
+            elif provider == "windows-tts":
+                self._play_windows_tts_direct(text)
+        finally:
+            with self._lock:
+                self._is_speaking_state = False
 
     def _play_edge_tts(self, text: str) -> None:
         """Synthesize Edge-TTS and play via system default media player or mplayer."""
@@ -297,9 +381,11 @@ class TTSManager:
 
             async def _run():
                 voice = self.voice
+                rate_str = self._format_rate(self.rate)
+                pitch_str = self._format_pitch(self.pitch)
                 with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
                     tmp_path = f.name
-                communicate = edge_tts.Communicate(text, voice=voice)
+                communicate = edge_tts.Communicate(text, voice=voice, rate=rate_str, pitch=pitch_str)
                 await communicate.save(tmp_path)
                 return tmp_path
 

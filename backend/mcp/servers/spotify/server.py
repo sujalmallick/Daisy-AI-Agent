@@ -52,31 +52,40 @@ class SpotifyMCPServer:
         except Exception as e:
             logger.error(f"Failed to initialize Spotify client: {e}")
 
+    def _dispatch_media_key(self, key_code: int) -> bool:
+        """Dispatches Windows hardware media key directly to local Spotify desktop."""
+        import sys
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                KEYEVENTF_KEYUP = 0x0002
+                ctypes.windll.user32.keybd_event(key_code, 0, 0, 0)
+                ctypes.windll.user32.keybd_event(key_code, 0, KEYEVENTF_KEYUP, 0)
+                logger.info(f"[Spotify] Dispatched Windows hardware media key {hex(key_code)}")
+                return True
+            except Exception as e:
+                logger.debug(f"[Spotify] Media key dispatch note: {e}")
+        return False
+
     def _ensure_active_device(self) -> Optional[str]:
         """
-        Finds an already-active/available Spotify device WITHOUT launching the app.
-        Auto-launch is intentionally removed — it caused Spotify to open on shutdown
-        because pause() calls this method even when nothing is playing.
-        Only the explicit play() path should open Spotify if needed.
+        Finds an already-active or Computer Spotify device.
+        Avoids returning inactive smart speakers (which return 404).
         """
         if not self.sp:
             return None
         try:
             devices = self.sp.devices().get("devices", [])
 
-            # Priority 1: Prefer local Computer / Desktop device (avoids 403 on smart speakers)
+            # Priority 1: Any device that is CURRENTLY ACTIVE
+            active_dev = next((d for d in devices if d.get("is_active")), None)
+            if active_dev:
+                return active_dev["id"]
+
+            # Priority 2: Any local Computer / Desktop device (even if idle)
             computer_dev = next((d for d in devices if d.get("type") in ("Computer", "Desktop")), None)
             if computer_dev:
                 return computer_dev["id"]
-
-            # Priority 2: Return any currently active device
-            active_dev = next((d for d in devices if d.get("is_active")), None)
-            if active_dev:
-                return active_dev.get("id")
-
-            # Priority 3: Return first available device (if any)
-            if devices:
-                return devices[0]["id"]
 
             return None
         except Exception as e:
@@ -350,33 +359,56 @@ class SpotifyMCPServer:
                 return {"error": f"Album '{album}' not found."}
 
             elif tool_name == "pause":
-                self.sp.pause_playback(device_id=target_device_id)
+                paused = False
+                try:
+                    self.sp.pause_playback(device_id=target_device_id)
+                    paused = True
+                except Exception as pause_err:
+                    logger.debug(f"Web API pause notice: {pause_err}. Falling back to Windows media key.")
+
+                if not paused:
+                    self._dispatch_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
                 return {"status": "paused", "message": "Playback paused."}
 
             elif tool_name == "resume":
-                self.sp.start_playback(device_id=target_device_id)
+                resumed = False
+                try:
+                    self.sp.start_playback(device_id=target_device_id)
+                    resumed = True
+                except Exception as resume_err:
+                    logger.debug(f"Web API resume notice: {resume_err}. Falling back to Windows media key.")
+
+                if not resumed:
+                    self._dispatch_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
+                    try:
+                        import subprocess
+                        subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
+                    except Exception:
+                        pass
                 return {"status": "resumed", "message": "Playback resumed."}
 
             elif tool_name == "next_track":
+                skipped = False
                 try:
                     self.sp.next_track(device_id=target_device_id)
+                    skipped = True
                 except Exception as next_err:
-                    if "NO_ACTIVE_DEVICE" in str(next_err) or "404" in str(next_err):
-                        target_device_id = self._ensure_active_device()
-                        self.sp.next_track(device_id=target_device_id)
-                    else:
-                        raise next_err
+                    logger.debug(f"Web API next notice: {next_err}. Falling back to Windows media key.")
+
+                if not skipped:
+                    self._dispatch_media_key(0xB0)  # VK_MEDIA_NEXT_TRACK
                 return {"status": "skipped", "message": "Skipped to next track."}
 
             elif tool_name == "previous_track":
+                prev_ok = False
                 try:
                     self.sp.previous_track(device_id=target_device_id)
+                    prev_ok = True
                 except Exception as prev_err:
-                    if "NO_ACTIVE_DEVICE" in str(prev_err) or "404" in str(prev_err):
-                        target_device_id = self._ensure_active_device()
-                        self.sp.previous_track(device_id=target_device_id)
-                    else:
-                        raise prev_err
+                    logger.debug(f"Web API previous notice: {prev_err}. Falling back to Windows media key.")
+
+                if not prev_ok:
+                    self._dispatch_media_key(0xB1)  # VK_MEDIA_PREV_TRACK
                 return {"status": "previous", "message": "Returning to previous track."}
 
             elif tool_name == "set_volume":

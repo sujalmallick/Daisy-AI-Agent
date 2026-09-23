@@ -144,6 +144,7 @@ export function App() {
   const bargeInGraceRef = useRef<number>(0);
   const bargeInActiveRef = useRef<boolean>(false);
   const startListeningDirectRef = useRef<() => void>(() => {});
+  const voiceWsRef = useRef<WebSocket | null>(null);
 
 
 
@@ -198,32 +199,6 @@ export function App() {
   // Restore saved window position on startup
   useEffect(() => {
     restoreWidgetPosition();
-
-    // Initialize WebRTC hardware Acoustic Echo Cancellation (AEC) and Noise Suppression
-    // This primes Windows WASAPI & Chromium audio to cancel speaker feedback during playback
-    let aecStream: MediaStream | null = null;
-    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices
-        .getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        })
-        .then((stream) => {
-          aecStream = stream;
-        })
-        .catch((e) => {
-          console.debug('AEC initialization note:', e);
-        });
-    }
-
-    return () => {
-      if (aecStream) {
-        aecStream.getTracks().forEach((track) => track.stop());
-      }
-    };
   }, []);
 
   // Persist app mode and sync native window mode
@@ -330,18 +305,27 @@ export function App() {
     // Stop any current speech before starting new one (no overlapping audio)
     ttsClient.stop();
 
-    isSpeakingRef.current = true;
-    bargeInActiveRef.current = true;
-    bargeInGraceRef.current = Date.now();
+    // Do not activate barge-in until audio physically begins playing out of speakers
     setOrbState('speaking');
 
     ttsClient.play(text, {
       onStart: () => {
         isSpeakingRef.current = true;
         bargeInActiveRef.current = true;
+        bargeInGraceRef.current = Date.now();
         setOrbState('speaking');
+        try {
+          if (voiceWsRef.current && voiceWsRef.current.readyState === WebSocket.OPEN) {
+            voiceWsRef.current.send(JSON.stringify({ action: 'speaking_start', text }));
+          }
+        } catch {}
       },
       onEnd: () => {
+        try {
+          if (voiceWsRef.current && voiceWsRef.current.readyState === WebSocket.OPEN) {
+            voiceWsRef.current.send(JSON.stringify({ action: 'speaking_stop' }));
+          }
+        } catch {}
         isSpeakingRef.current = false;
         bargeInActiveRef.current = false;
         isProcessingRef.current = false;
@@ -359,6 +343,11 @@ export function App() {
         }
       },
       onError: () => {
+        try {
+          if (voiceWsRef.current && voiceWsRef.current.readyState === WebSocket.OPEN) {
+            voiceWsRef.current.send(JSON.stringify({ action: 'speaking_stop' }));
+          }
+        } catch {}
         isSpeakingRef.current = false;
         bargeInActiveRef.current = false;
         isProcessingRef.current = false;
@@ -377,11 +366,7 @@ export function App() {
     voiceTimersRef.current = [];
   }, []);
 
-  const queueVoiceTimer = useCallback((fn: () => void, delayMs: number) => {
-    const id = window.setTimeout(fn, delayMs);
-    voiceTimersRef.current.push(id);
-    return id;
-  }, []);
+  const lastProcessedCmdRef = useRef<{ text: string; time: number }>({ text: '', time: 0 });
 
   useEffect(() => {
     return () => {
@@ -389,109 +374,118 @@ export function App() {
     };
   }, [clearVoiceTimers]);
 
+  // Unified command execution response handler (used by both HTTP /command and WebSocket STT)
+  const handleCommandResponse = useCallback((data: any, prompt: string = 'Voice Command', fallbackTts: string = '') => {
+    // Build a conversation card from every response
+    if (data.display_text || data.spoken_reply) {
+      const newCard: ConversationCardData = {
+        id: Date.now().toString(),
+        prompt: prompt || data.prompt || 'Voice Command',
+        source: data.source,
+        spokenReply: data.spoken_reply,
+        displayText: data.display_text || data.spoken_reply,
+        cardType: data.card_type || 'answer',
+        cardData: data.card_data,
+        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      };
+      setActiveCard(newCard);
+      setConversationHistory((prev) => [newCard, ...prev].slice(0, 20));
+      if (data.card_data?.pointer_target) {
+        setPointerTarget(data.card_data.pointer_target);
+      }
+    }
+
+    // Check if self-close / exit was triggered ("sayonara daisy", "go home daisy")
+    if (data.should_exit) {
+      setOrbState('speaking');
+      const farewell = data.spoken_reply || "Sayonara! Goodbye!";
+      showToast(farewell, 'Sayonara Daisy', 3000);
+      speakAloud(farewell);
+
+      // Allow farewell TTS to be spoken aloud before terminating window and backend
+      setTimeout(async () => {
+        await closeApp();
+      }, 2200);
+      return;
+    }
+
+    // Check if action requires interactive confirmation ("Are you sure you want to close Chrome?")
+    if (data.awaiting_confirmation) {
+      setOrbState('speaking');
+      const question = data.spoken_reply || "Are you sure?";
+      showToast(question, 'Confirmation Required', 3500);
+      speakAloud(question, () => {
+        // When Daisy finishes asking the question, open mic directly for "yes" or "no"
+        startListeningDirectRef.current();
+      });
+      return;
+    }
+
+    setOrbState('executing');
+    showToast(data.spoken_reply || `Executed: ${data.source}`, assistantNameRef.current, 2000);
+
+    const reply = data.spoken_reply || fallbackTts;
+    if (reply && reply !== 'Done.') {
+      setOrbState('speaking');
+      showToast(reply, 'Spoken Reply', 3200);
+      speakAloud(reply);
+    } else {
+      setOrbState('idle');
+      unduckPlayback();
+    }
+
+    // If playback command, refresh immediately
+    fetchLivePlayback(true);
+  }, [showToast, speakAloud, fetchLivePlayback, unduckPlayback]);
+
   // Voice command flow
   const runVoiceFlow = useCallback(async (cmd: string, defaultTts: string, isGemini: boolean = false) => {
+    const cleanCmd = cmd.trim().toLowerCase();
+    const now = Date.now();
+    if (cleanCmd && cleanCmd === lastProcessedCmdRef.current.text && now - lastProcessedCmdRef.current.time < 3000) {
+      console.log('[Voice] Skipping duplicate command in flight:', cmd);
+      return;
+    }
+    if (cleanCmd) {
+      lastProcessedCmdRef.current = { text: cleanCmd, time: now };
+    }
+
     clearVoiceTimers();
     isProcessingRef.current = true;
     setOrbState('listening');
     duckPlayback();
     showToast(`"${cmd}"`, `Wake: ${assistantNameRef.current}`, 1600);
 
-    queueVoiceTimer(async () => {
-      setOrbState('thinking');
-      showToast(
-        isGemini ? 'Gemini resolving query...' : 'Processing intent...',
-        isGemini ? 'Gemini' : 'FastPath',
-        1400
-      );
+    setOrbState('thinking');
+    showToast(
+      isGemini ? 'Gemini resolving query...' : 'Processing intent...',
+      isGemini ? 'Gemini' : 'FastPath',
+      1400
+    );
 
-      try {
-        const res = await fetch('http://127.0.0.1:8000/command', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: cmd, speak_backend: false, assistant_name: assistantNameRef.current }),
-        });
+    try {
+      const res = await fetch('http://127.0.0.1:8000/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: cmd, speak_backend: false, assistant_name: assistantNameRef.current }),
+      });
 
-        if (res.ok) {
-          const data = await res.json();
-
-          // Build a conversation card from every response
-          if (data.display_text || data.spoken_reply) {
-            const newCard: ConversationCardData = {
-              id: Date.now().toString(),
-              prompt: cmd,
-              source: data.source,
-              spokenReply: data.spoken_reply,
-              displayText: data.display_text || data.spoken_reply,
-              cardType: data.card_type || 'answer',
-              cardData: data.card_data,
-              timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            };
-            setActiveCard(newCard);
-            setConversationHistory(prev => [newCard, ...prev].slice(0, 20));
-            if (data.card_data?.pointer_target) {
-              setPointerTarget(data.card_data.pointer_target);
-            }
-          }
-
-          // Check if self-close / exit was triggered ("sayonara daisy", "go home daisy")
-          if (data.should_exit) {
-            setOrbState('speaking');
-            const farewell = data.spoken_reply || "Sayonara! Goodbye!";
-            showToast(farewell, 'Sayonara Daisy', 3000);
-            speakAloud(farewell);
-
-            // Allow farewell TTS to be spoken aloud before terminating window and backend
-            setTimeout(async () => {
-              await closeApp();
-            }, 2200);
-            return;
-          }
-
-          // Check if action requires interactive confirmation ("Are you sure you want to close Chrome?")
-          if (data.awaiting_confirmation) {
-            queueVoiceTimer(() => {
-              setOrbState('speaking');
-              const question = data.spoken_reply || "Are you sure?";
-              showToast(question, 'Confirmation Required', 3500);
-              speakAloud(question, () => {
-                // When Daisy finishes asking the question, open mic directly for "yes" or "no"
-                startListeningDirectRef.current();
-              });
-            }, 450);
-            return;
-          }
-
-          setOrbState('executing');
-          showToast(data.spoken_reply || `Executed: ${data.source}`, assistantNameRef.current, 2000);
-
-          queueVoiceTimer(() => {
-            setOrbState('speaking');
-            const reply = data.spoken_reply || defaultTts;
-            showToast(reply, 'Spoken Reply', 3200);
-            speakAloud(reply);
-          }, 450);
-
-          // If playback command, refresh immediately
-          queueVoiceTimer(() => fetchLivePlayback(true), 600);
-          return;
-        }
-      } catch {
-        // Fallback simulation
+      if (res.ok) {
+        const data = await res.json();
+        handleCommandResponse(data, cmd, defaultTts);
+        return;
       }
+    } catch {
+      // Fallback simulation
+    }
 
-      queueVoiceTimer(() => {
-        setOrbState('executing');
-        showToast('Action processed', 'Executing', 1000);
+    setOrbState('executing');
+    showToast('Action processed', 'Executing', 1000);
 
-        queueVoiceTimer(() => {
-          setOrbState('speaking');
-          showToast(defaultTts, `${assistantNameRef.current} Voice`, 2600);
-          speakAloud(defaultTts);
-        }, 450);
-      }, 450);
-    }, 450);
-  }, [showToast, speakAloud, fetchLivePlayback, clearVoiceTimers, queueVoiceTimer, duckPlayback]);
+    setOrbState('speaking');
+    showToast(defaultTts, `${assistantNameRef.current} Voice`, 2600);
+    speakAloud(defaultTts);
+  }, [showToast, speakAloud, handleCommandResponse, clearVoiceTimers, duckPlayback]);
 
   const startListeningDirect = useCallback(() => {
     cancelDirectListeningTimeout();
@@ -500,6 +494,16 @@ export function App() {
     duckPlayback();
     showToast('Listening... Speak now', 'Microphone Active', 3000);
 
+    // 1. Trigger backend native STT listener immediately (for WebView2 / native app)
+    try {
+      if (voiceWsRef.current && voiceWsRef.current.readyState === WebSocket.OPEN) {
+        voiceWsRef.current.send(JSON.stringify({ action: 'listen' }));
+      } else {
+        fetch('http://127.0.0.1:8000/voice/listen', { method: 'POST' }).catch(() => {});
+      }
+    } catch {}
+
+    // 2. Also start Web Speech API if present (browser fallback)
     try {
       recognitionRef.current?.start();
     } catch {}
@@ -642,16 +646,7 @@ export function App() {
       };
 
       rec.onspeechend = () => {
-        cancelDirectListeningTimeout();
-        if (isDirectListeningRef.current) {
-          window.setTimeout(() => {
-            if (isDirectListeningRef.current) {
-              isDirectListeningRef.current = false;
-              setOrbState('idle');
-              unduckPlayback();
-            }
-          }, 1200);
-        }
+        // Keep direct listening active while cloud transcription is in-flight until onresult or watchdog
       };
 
       rec.onerror = (e: any) => {
@@ -696,6 +691,98 @@ export function App() {
       } catch {}
     };
   }, [isAmbientListening, runVoiceFlow, showToast, cancelDirectListeningTimeout, duckPlayback, unduckPlayback]);
+
+  // Real-time backend STT WebSocket connection (enables native WebView2 listening without cloud speech API)
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let isMounted = true;
+
+    const connectWs = () => {
+      try {
+        ws = new WebSocket('ws://127.0.0.1:8000/ws/voice');
+        voiceWsRef.current = ws;
+
+        ws.onopen = () => {
+          console.log('[Daisy Voice WS] Connected to backend local GPU STT.');
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.event === 'state_change') {
+              if (msg.state === 'listening') {
+                setOrbState('listening');
+                duckPlayback();
+              } else if (msg.state === 'thinking') {
+                setOrbState('thinking');
+              } else if (msg.state === 'speaking') {
+                setOrbState('speaking');
+              } else if (msg.state === 'idle') {
+                setOrbState('idle');
+                unduckPlayback();
+              }
+            } else if (msg.event === 'transcript') {
+              showToast(`"${msg.text}"`, 'Daisy Local Voice', 2200);
+            } else if (msg.event === 'command_result' && msg.data) {
+              const prompt = (msg.data.prompt || '').trim().toLowerCase();
+              const now = Date.now();
+              if (prompt && prompt === lastProcessedCmdRef.current.text && now - lastProcessedCmdRef.current.time < 3000) {
+                console.log('[Daisy Voice WS] Skipping duplicate command_result from backend:', prompt);
+                return;
+              }
+              if (prompt) {
+                lastProcessedCmdRef.current = { text: prompt, time: now };
+              }
+              cancelDirectListeningTimeout();
+              isDirectListeningRef.current = false;
+              handleCommandResponse(msg.data, msg.data.prompt || 'Voice Command');
+            } else if (msg.event === 'cancel_tts') {
+              console.log('[Barge-In] Backend detected vocal interruption — halting speech.');
+              ttsClient.stop();
+              isSpeakingRef.current = false;
+              bargeInActiveRef.current = false;
+              setOrbState('listening');
+              duckPlayback();
+              showToast('Interrupted', assistantNameRef.current, 1200);
+            }
+          } catch (e) {
+            console.debug('[Daisy Voice WS] Parse error:', e);
+          }
+        };
+
+        ws.onclose = () => {
+          voiceWsRef.current = null;
+          if (isMounted) {
+            reconnectTimer = window.setTimeout(connectWs, 3000);
+          }
+        };
+
+        ws.onerror = () => {
+          try {
+            ws?.close();
+          } catch {}
+        };
+      } catch {
+        if (isMounted) {
+          reconnectTimer = window.setTimeout(connectWs, 4000);
+        }
+      }
+    };
+
+    connectWs();
+
+    return () => {
+      isMounted = false;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      if (ws) {
+        try {
+          ws.close();
+        } catch {}
+      }
+      voiceWsRef.current = null;
+    };
+  }, [showToast, duckPlayback, unduckPlayback, fetchLivePlayback, handleCommandResponse, cancelDirectListeningTimeout]);
 
 
 

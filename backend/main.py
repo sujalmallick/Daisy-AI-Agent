@@ -9,7 +9,7 @@ if PROJECT_ROOT not in sys.path:
 import html
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Any, Dict, List
@@ -46,7 +46,21 @@ logger = logging.getLogger("daisy.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        import asyncio
+        from backend.voice.stt_listener import stt_listener
+        stt_listener.set_event_loop(asyncio.get_running_loop())
+        stt_listener.start()
+    except Exception as e:
+        logger.warning(f"[Main] STT listener startup note: {e}")
+
     yield
+
+    try:
+        from backend.voice.stt_listener import stt_listener
+        stt_listener.stop()
+    except Exception:
+        pass
     logger.info("[Main] FastAPI shutdown event received. Executing lifecycle shutdown...")
     lifecycle_manager.shutdown("fastapi_shutdown")
 
@@ -319,6 +333,67 @@ def synthesize_voice(text: str):
         }
     )
 
+@app.get("/voice/synthesize/stream")
+async def synthesize_voice_stream(text: str):
+    """
+    Stream synthesized audio chunks directly to frontend.
+    Returns chunked audio/mpeg (Edge-TTS) for sub-200ms time-to-first-audio-byte.
+    """
+    from fastapi.responses import StreamingResponse, Response
+    if not text or not text.strip():
+        return Response(status_code=204)
+
+    if tts_manager.provider == "disabled":
+        return Response(status_code=204)
+
+    media_type = "audio/mpeg" if tts_manager.provider == "edge-tts" else "audio/wav"
+    return StreamingResponse(
+        tts_manager.stream_chunks(text.strip()),
+        media_type=media_type,
+        headers={
+            "Cache-Control": "no-cache",
+            "Transfer-Encoding": "chunked",
+        }
+    )
+
+@app.post("/voice/listen")
+def trigger_voice_listen():
+    """Trigger direct microphone listening immediately (e.g. from frontend Orb click)."""
+    try:
+        from backend.voice.stt_listener import stt_listener
+        stt_listener.trigger_listen()
+        return {"status": "listening"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.websocket("/ws/voice")
+async def voice_websocket_endpoint(websocket: WebSocket):
+    """Real-time bidirectional WebSocket for native STT listening, state sync, and barge-in."""
+    await websocket.accept()
+    from backend.voice.stt_listener import stt_listener
+    stt_listener.register_websocket(websocket)
+    try:
+        # Send initial state to client
+        await websocket.send_json({"event": "state_change", "state": stt_listener.state})
+        while True:
+            data = await websocket.receive_json()
+            action = data.get("action")
+            if action == "listen":
+                stt_listener.trigger_listen()
+            elif action == "stop_listening":
+                stt_listener.stop_listen()
+            elif action == "cancel":
+                tts_manager.stop()
+                stt_listener.reset()
+            elif action == "speaking_start":
+                stt_listener.set_speaking(True, data.get("text", ""))
+            elif action == "speaking_stop":
+                stt_listener.set_speaking(False)
+    except WebSocketDisconnect:
+        stt_listener.unregister_websocket(websocket)
+    except Exception:
+        stt_listener.unregister_websocket(websocket)
+
 @app.post("/voice/test")
 def test_voice():
     """Trigger a test phrase via the active TTS provider (plays on server speakers)."""
@@ -397,13 +472,29 @@ def open_system_browser(req: OpenBrowserRequest):
     return {"status": "launched" if success else "dispatched", "url": req.url}
 
 @app.get("/auth/spotify")
+@app.get("/auth/login")
 def auth_spotify():
     from fastapi.responses import RedirectResponse
     from backend.mcp.servers.spotify.server import spotify_server
+    if not spotify_server.auth_manager:
+        spotify_server._init_client()
     if spotify_server.auth_manager:
         url = spotify_server.auth_manager.get_authorize_url()
         return RedirectResponse(url)
     return {"error": "Spotify credentials not set in .env"}
+
+@app.post("/auth/disconnect")
+def disconnect_spotify():
+    """Clears local Spotify OAuth token cache to allow reconnecting."""
+    from backend.mcp.servers.spotify.server import spotify_server
+    cache_path = os.path.join(PROJECT_ROOT, ".cache")
+    if os.path.exists(cache_path):
+        try:
+            os.remove(cache_path)
+        except Exception:
+            pass
+    spotify_server._init_client()
+    return {"status": "disconnected"}
 
 @app.get("/callback")
 def auth_callback(code: str = None, error: str = None):

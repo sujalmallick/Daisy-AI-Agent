@@ -18,6 +18,7 @@ import {
   Check
 } from 'lucide-react';
 import type { ThemeType, OrbStateType } from './FloatingOrb';
+import { ttsClient } from '../utils/ttsClient';
 
 export interface SettingsModalProps {
   isOpen: boolean;
@@ -118,7 +119,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Voice configuration state
   const [voiceProvider, setVoiceProvider] = useState<string>('edge-tts');
-  const [voiceSelected, setVoiceSelected] = useState<string>('en-US-JennyNeural');
+  const [voiceSelected, setVoiceSelected] = useState<string>('en-US-AvaNeural');
   const [edgeVoices, setEdgeVoices] = useState<Array<{ name: string; label: string }>>([]);
   const [windowsVoiceSelected, setWindowsVoiceSelected] = useState<string>('Microsoft Zira Desktop');
   const [windowsVoices, setWindowsVoices] = useState<Array<{ name: string; label: string }>>([]);
@@ -244,6 +245,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleConnectSpotify = async () => {
+    try {
+      await fetch('http://127.0.0.1:8000/system/open-browser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: 'http://127.0.0.1:8000/auth/spotify' }),
+      });
+    } catch {
+      window.open('http://127.0.0.1:8000/auth/spotify', '_blank');
+    }
+  };
+
+  const handleDisconnectSpotify = async () => {
+    try {
+      await fetch('http://127.0.0.1:8000/auth/disconnect', { method: 'POST' });
+      setIsConnected(false);
+      checkStatus();
+    } catch (e) {
+      console.warn('Disconnect notice:', e);
+    }
+  };
+
   const saveVoiceConfig = async (updates: Record<string, string>) => {
     setIsSavingVoice(true);
     try {
@@ -254,6 +277,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       });
       if (res.ok) {
         const d = await res.json();
+        ttsClient.invalidateConfigCache();
         setVoiceProvider(d.provider || voiceProvider);
         setVoiceSelected(d.voice || voiceSelected);
         setWindowsVoiceSelected(d.windows_voice || windowsVoiceSelected);
@@ -580,7 +604,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="bg-black/50 border border-white/15 rounded-lg px-2.5 py-1 text-xs text-zinc-200 focus:outline-none"
                   >
                     <option value="edge-tts">Edge-TTS (Online Neural)</option>
-                    <option value="windows">Windows Native (SAPI Offline)</option>
+                    <option value="windows-tts">Windows Native (SAPI Offline)</option>
                   </select>
                 </div>
 
@@ -605,7 +629,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       edgeVoices.length > 0 ? (
                         edgeVoices.map((v) => <option key={v.name} value={v.name}>{v.label}</option>)
                       ) : (
-                        <option value="en-US-JennyNeural">Jenny (Natural US)</option>
+                        <>
+                          <option value="en-US-AvaNeural">Ava (US Warm Female, Neural)</option>
+                          <option value="en-US-EmmaNeural">Emma (US Conversational Female, Neural)</option>
+                          <option value="en-US-JennyNeural">Jenny (Natural US)</option>
+                        </>
                       )
                     ) : (
                       windowsVoices.length > 0 ? (
@@ -704,16 +732,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {/* Reconnect / Authenticate */}
                 <div className="flex items-center justify-between py-3">
                   <div className="space-y-0.5 pr-4">
-                    <div className="text-sm font-semibold text-white tracking-tight">Authorize Spotify</div>
-                    <div className="text-xs text-zinc-400 font-normal">Refresh OAuth token credentials</div>
+                    <div className="text-sm font-semibold text-white tracking-tight">
+                      {isConnected ? 'Spotify Account' : 'Authorize Spotify'}
+                    </div>
+                    <div className="text-xs text-zinc-400 font-normal">
+                      {isConnected ? 'Connected to Spotify Web API' : 'Refresh OAuth token credentials'}
+                    </div>
                   </div>
-                  <button
-                    onClick={() => window.open('http://127.0.0.1:8000/auth/login', '_blank')}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Login</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {isConnected && (
+                      <button
+                        type="button"
+                        onClick={handleDisconnectSpotify}
+                        className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-rose-500/20 text-zinc-400 hover:text-rose-300 border border-white/10 hover:border-rose-500/30 text-xs font-medium transition cursor-pointer"
+                        title="Disconnect and clear token cache"
+                      >
+                        Disconnect
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleConnectSpotify}
+                      className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>{isConnected ? 'Reconnect' : 'Connect Spotify'}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
