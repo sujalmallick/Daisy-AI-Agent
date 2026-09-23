@@ -206,6 +206,8 @@ def active_window_endpoint():
 class PlaybackActionRequest(BaseModel):
     action: str
     value: Optional[Any] = None
+    uri: Optional[str] = None
+    track: Optional[str] = None
 
 @app.get("/playback")
 def current_playback():
@@ -219,7 +221,12 @@ def execute_playback_action(req: PlaybackActionRequest):
     if act in ("pause", "stop"):
         return mcp_manager.execute("spotify.pause")
     elif act in ("play", "resume"):
-        return mcp_manager.execute("spotify.resume")
+        resume_args = {}
+        if req.uri:
+            resume_args["uri"] = req.uri
+        if req.track:
+            resume_args["track"] = req.track
+        return mcp_manager.execute("spotify.resume", resume_args)
     elif act in ("next", "skip"):
         return mcp_manager.execute("spotify.next_track")
     elif act in ("previous", "prev"):

@@ -1,0 +1,38 @@
+[
+  {
+    "_comment": "HTTP tool example — bearer token stays in YOUR local custom_mcps.json, never committed",
+    "name": "example_http_tool",
+    "description": "Describe what this HTTP tool does.",
+    "type": "http",
+    "url": "https://api.example.com/endpoint",
+    "method": "GET",
+    "headers": {
+      "Authorization": "Bearer YOUR_API_KEY_HERE"
+    },
+    "parameters": {
+      "query": {
+        "type": "string",
+        "description": "Search term",
+        "required": false
+      }
+    },
+    "trigger_phrases": [
+      "example phrase one",
+      "example phrase two"
+    ],
+    "enabled": false
+  },
+  {
+    "_comment": "Command tool example — runs a local CLI command",
+    "name": "example_command_tool",
+    "description": "Describe what this command does.",
+    "type": "command",
+    "command": "powershell -Command "Write-Output 'Hello from Daisy'"",
+    "timeout": 10,
+    "parameters": {},
+    "trigger_phrases": [
+      "run example command"
+    ],
+    "enabled": false
+  }
+]

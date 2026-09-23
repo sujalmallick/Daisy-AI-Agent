@@ -21,51 +21,32 @@ class SpotifyMCPServer:
         self.auth_manager = None
         self._last_network_error_time = 0
         self._saved_pre_duck_volume = None
-        self._last_known_track_info: Dict[str, Any] = {}
+        self._last_track_file = os.path.join(os.path.dirname(__file__), ".last_track.json")
+        self._last_known_track_info: Dict[str, Any] = self._load_last_track_info()
         self._init_client()
 
-    def _init_client(self):
+    def _load_last_track_info(self) -> Dict[str, Any]:
         try:
-            from spotipy import Spotify, SpotifyOAuth
-            client_id = os.getenv("SPOTIPY_CLIENT_ID")
-            client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
-            redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI", "http://localhost:8888/callback")
+            import json
+            if os.path.exists(self._last_track_file):
+                with open(self._last_track_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
 
-            # Suppress noisy transient urllib3 retry warnings
-            logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
-
-            if client_id and client_secret:
-                self.auth_manager = SpotifyOAuth(
-                    client_id=client_id,
-                    client_secret=client_secret,
-                    redirect_uri=redirect_uri,
-                    scope="user-modify-playback-state user-read-playback-state",
-                    open_browser=True
-                )
-                self.sp = Spotify(
-                    auth_manager=self.auth_manager,
-                    requests_timeout=10,
-                    retries=1
-                )
-                logger.info("Spotify MCP Server successfully configured.")
-            else:
-                logger.warning("SPOTIPY_CLIENT_ID or SPOTIPY_CLIENT_SECRET not set in environment.")
-        except Exception as e:
-            logger.error(f"Failed to initialize Spotify client: {e}")
+    def _save_last_track_info(self, info: Dict[str, Any]):
+        try:
+            import json
+            self._last_known_track_info = info
+            with open(self._last_track_file, "w", encoding="utf-8") as f:
+                json.dump(info, f)
+        except Exception:
+            pass
 
     def _dispatch_media_key(self, key_code: int) -> bool:
-        """Dispatches Windows hardware media key directly to local Spotify desktop."""
-        import sys
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                KEYEVENTF_KEYUP = 0x0002
-                ctypes.windll.user32.keybd_event(key_code, 0, 0, 0)
-                ctypes.windll.user32.keybd_event(key_code, 0, KEYEVENTF_KEYUP, 0)
-                logger.info(f"[Spotify] Dispatched Windows hardware media key {hex(key_code)}")
-                return True
-            except Exception as e:
-                logger.debug(f"[Spotify] Media key dispatch note: {e}")
+        """Disabled to prevent hijacking active browser media tabs (e.g. YouTube)."""
+        logger.debug(f"[Spotify] Media key {hex(key_code)} suppressed to protect browser media sessions.")
         return False
 
     def _get_target_device(self) -> Optional[Dict[str, Any]]:
@@ -325,7 +306,7 @@ class SpotifyMCPServer:
                     except Exception as web_err:
                         logger.debug(f"Web API playback note: {web_err}")
 
-                    # If targeting PC on Windows, also dispatch URI protocol and media key to ensure local client wakes up
+                    # If targeting PC on Windows, dispatch URI protocol to ensure local client wakes up
                     import sys
                     if sys.platform == "win32" and (is_pc or not target_device_id):
                         try:
@@ -333,10 +314,9 @@ class SpotifyMCPServer:
                             subprocess.Popen(["cmd", "/c", "start", "", f"{track_uri}:play"], shell=True)
                         except Exception as uri_err:
                             logger.debug(f"Direct URI playback note: {uri_err}")
-                        self._dispatch_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
 
-                    # Cache track info so compact player & conversation card immediately show full metadata & artwork
-                    self._last_known_track_info = {
+                    # Persist track info to disk and memory for seamless resumption
+                    self._save_last_track_info({
                         "track": track["name"],
                         "artist": artist_name,
                         "album": album_name,
@@ -345,7 +325,7 @@ class SpotifyMCPServer:
                         "uri": track_uri,
                         "device": dev_name,
                         "is_pc": is_pc,
-                    }
+                    })
 
                     return {
                         "status": "playing",
@@ -392,9 +372,8 @@ class SpotifyMCPServer:
                             subprocess.Popen(["cmd", "/c", "start", "", f"{alb_uri}:play"], shell=True)
                         except Exception as uri_err:
                             logger.debug(f"Direct album URI playback note: {uri_err}")
-                        self._dispatch_media_key(0xB3)
 
-                    self._last_known_track_info = {
+                    self._save_last_track_info({
                         "track": alb["name"],
                         "artist": alb_artists,
                         "album": alb["name"],
@@ -403,7 +382,7 @@ class SpotifyMCPServer:
                         "uri": alb_uri,
                         "device": dev_name,
                         "is_pc": is_pc,
-                    }
+                    })
 
                     return {
                         "status": "playing_album",
@@ -423,37 +402,56 @@ class SpotifyMCPServer:
                     self.sp.pause_playback(device_id=target_device_id)
                     paused = True
                 except Exception as pause_err:
-                    logger.debug(f"Web API pause notice: {pause_err}. Falling back to Windows media key.")
+                    logger.debug(f"Web API pause notice: {pause_err}")
 
-                if not paused:
-                    self._dispatch_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
                 return {"status": "paused", "message": "Playback paused."}
 
             elif tool_name == "resume":
+                track_uri = args.get("uri") or self._last_known_track_info.get("uri")
+                track_name = args.get("track") or args.get("query") or self._last_known_track_info.get("track")
+                dev_name = target_device_name or "Spotify"
+                is_pc = target_device_type in ("Computer", "Desktop")
                 resumed = False
-                try:
-                    self.sp.start_playback(device_id=target_device_id)
-                    resumed = True
-                except Exception as resume_err:
-                    logger.debug(f"Web API resume notice: {resume_err}. Falling back to Windows media key.")
 
-                if not resumed:
-                    self._dispatch_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
-
-                # If no item is playing in Spotify, resume last known track uri if available
-                if not resumed and self._last_known_track_info.get("uri"):
+                # 1. If we have a track URI, start playback targeting the URI
+                if track_uri:
+                    if target_device_id:
+                        try:
+                            self.sp.transfer_playback(device_id=target_device_id, force_play=True)
+                        except Exception:
+                            pass
                     try:
-                        self.sp.start_playback(device_id=target_device_id, uris=[self._last_known_track_info["uri"]])
+                        self.sp.start_playback(device_id=target_device_id, uris=[track_uri])
                         resumed = True
-                    except Exception:
-                        pass
+                    except Exception as uri_err:
+                        logger.debug(f"Resume with URI failed: {uri_err}")
+
+                # 2. If no track URI or start with URI failed, attempt standard resume
+                if not resumed:
+                    try:
+                        self.sp.start_playback(device_id=target_device_id)
+                        resumed = True
+                    except Exception as resume_err:
+                        logger.debug(f"Standard start_playback resume notice: {resume_err}")
+
+                # 3. If targeting PC on Windows and we have a track URI, open the URI specifically to Spotify desktop
+                import sys
+                if sys.platform == "win32" and (is_pc or not target_device_id) and track_uri:
+                    try:
+                        import subprocess
+                        subprocess.Popen(["cmd", "/c", "start", "", f"{track_uri}:play"], shell=True)
+                        resumed = True
+                    except Exception as proc_err:
+                        logger.debug(f"Direct URI resume error: {proc_err}")
 
                 return {
-                    "status": "resumed",
-                    "track": self._last_known_track_info.get("track"),
+                    "status": "resumed" if resumed else "error",
+                    "track": self._last_known_track_info.get("track") or track_name,
                     "artist": self._last_known_track_info.get("artist"),
                     "artwork_url": self._last_known_track_info.get("artwork_url"),
-                    "message": "Playback resumed."
+                    "device": dev_name,
+                    "is_pc": is_pc,
+                    "message": f"Playback resumed on {dev_name}." if resumed else "Could not resume Spotify playback."
                 }
 
             elif tool_name == "next_track":
@@ -462,10 +460,8 @@ class SpotifyMCPServer:
                     self.sp.next_track(device_id=target_device_id)
                     skipped = True
                 except Exception as next_err:
-                    logger.debug(f"Web API next notice: {next_err}. Falling back to Windows media key.")
+                    logger.debug(f"Web API next notice: {next_err}")
 
-                if not skipped:
-                    self._dispatch_media_key(0xB0)  # VK_MEDIA_NEXT_TRACK
                 return {"status": "skipped", "message": "Skipped to next track."}
 
             elif tool_name == "previous_track":
@@ -474,10 +470,8 @@ class SpotifyMCPServer:
                     self.sp.previous_track(device_id=target_device_id)
                     prev_ok = True
                 except Exception as prev_err:
-                    logger.debug(f"Web API previous notice: {prev_err}. Falling back to Windows media key.")
+                    logger.debug(f"Web API previous notice: {prev_err}")
 
-                if not prev_ok:
-                    self._dispatch_media_key(0xB1)  # VK_MEDIA_PREV_TRACK
                 return {"status": "previous", "message": "Returning to previous track."}
 
             elif tool_name == "set_volume":
@@ -531,13 +525,14 @@ class SpotifyMCPServer:
                     dev = pb.get("device") or {}
                     artists = ", ".join(a["name"] for a in item.get("artists", [])) or item["artists"][0]["name"]
                     artwork_url = item["album"]["images"][0]["url"] if item["album"]["images"] else None
-                    self._last_known_track_info = {
+                    self._save_last_track_info({
                         "track": item["name"],
                         "artist": artists,
                         "album": item["album"]["name"],
                         "artwork_url": artwork_url,
                         "duration_ms": item.get("duration_ms", 0),
-                    }
+                        "uri": item.get("uri"),
+                    })
                     return {
                         "is_playing": pb.get("is_playing", False),
                         "track": item["name"],
@@ -546,6 +541,7 @@ class SpotifyMCPServer:
                         "progress_ms": pb.get("progress_ms", 0),
                         "duration_ms": item.get("duration_ms", 0),
                         "artwork_url": artwork_url,
+                        "uri": item.get("uri"),
                         "device_name": dev.get("name", "Spotify Device"),
                         "device_type": dev.get("type", "Speaker"),
                         "volume_percent": dev.get("volume_percent", 70),
@@ -565,6 +561,7 @@ class SpotifyMCPServer:
                         "album": self._last_known_track_info.get("album"),
                         "artwork_url": self._last_known_track_info.get("artwork_url"),
                         "duration_ms": self._last_known_track_info.get("duration_ms", 0),
+                        "uri": self._last_known_track_info.get("uri"),
                         "progress_ms": 0,
                         "message": "Playback paused.",
                         "device_name": active_dev.get("name") if active_dev else "Spotify Device",

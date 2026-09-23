@@ -1,16 +1,40 @@
-# Environment variables & secrets
+# ============================================================
+# Environment variables & secrets — NEVER commit real keys
+# ============================================================
 .env
 .env.*
 !.env.example
 
-# Token Caches (Spotify / Spotipy)
+# ---- Spotify / Spotipy token caches ----
 .cache
 .cache*
 *.cache
 .spotipy*
+
+# ---- User config files (may contain API keys / auth headers) ----
+# custom_mcps.json stores user-defined HTTP tools that can have
+# Authorization headers, bearer tokens, webhook secrets, etc.
+backend/config/custom_mcps.json
+# voice_config.json is machine-local (no secrets currently, but good hygiene)
+backend/config/voice_config.json
+
+# ---- Generic credential / token file patterns ----
+*.token
+*.tokens
+*.credentials
+*.secret
+*.secrets
+token.json
+credentials.json
+service_account.json
+gcloud_credentials.json
+
+# ---- Screenshot / screen-capture cache ----
 .daisy_cache/
 
+# ============================================================
 # Python
+# ============================================================
 venv/
 env/
 __pycache__/
@@ -19,18 +43,40 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .coverage
+.mypy_cache/
+.ruff_cache/
 
+# ============================================================
 # Node & Desktop frontend
+# ============================================================
 node_modules/
 dist/
 dist-ssr/
 *.local
 
+# ============================================================
 # Tauri & Rust build artifacts
+# ============================================================
 desktop/src-tauri/target/
 src-tauri/target/
 
-# Audio outputs & logs
+# ============================================================
+# Audio outputs & temporary files
+# ============================================================
 *.mp3
 *.wav
-*.log
+*.log
+*.tmp
+*.temp
+
+# ============================================================
+# OS / editor noise
+# ============================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
