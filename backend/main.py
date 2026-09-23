@@ -48,7 +48,10 @@ logger = logging.getLogger("daisy.api")
 async def lifespan(app: FastAPI):
     try:
         import asyncio
+        import threading
         from backend.voice.stt_listener import stt_listener
+        from backend.voice.stt_engine import stt_engine
+        threading.Thread(target=stt_engine.warmup, daemon=True).start()
         stt_listener.set_event_loop(asyncio.get_running_loop())
         stt_listener.start()
     except Exception as e:
