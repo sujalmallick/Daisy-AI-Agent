@@ -38,7 +38,22 @@ class AdaptiveSTTEngine:
                 text = " ".join([s.text for s in segments]).strip()
                 return text
             except Exception as e:
-                logger.error(f"Whisper transcription error: {e}")
+                logger.error(f"Whisper transcription error on {self.hw_info.get('device')}: {e}")
+                # If CUDA library missing, seamlessly downgrade to CPU int8
+                if "cublas" in str(e).lower() or "cuda" in str(e).lower():
+                    try:
+                        logger.info("Falling back to faster-whisper on CPU (int8)...")
+                        from faster_whisper import WhisperModel
+                        self.model = WhisperModel("small.en", device="cpu", compute_type="int8")
+                        self.hw_info["device"] = "cpu"
+                        self.hw_info["compute_type"] = "int8"
+                        if hasattr(audio_file_or_data, "seek"):
+                            audio_file_or_data.seek(0)
+                        segments, _ = self.model.transcribe(audio_file_or_data, beam_size=2)
+                        text = " ".join([s.text for s in segments]).strip()
+                        return text
+                    except Exception as cpu_err:
+                        logger.error(f"CPU Whisper fallback error: {cpu_err}")
 
         # Fallback to speech_recognition
         try:
