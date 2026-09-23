@@ -47,6 +47,9 @@ export const CompactPlayer: React.FC<CompactPlayerProps> = ({
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
     startXRef.current = e.clientX;
     hasDraggedRef.current = false;
     setIsDragging(true);
@@ -55,22 +58,25 @@ export const CompactPlayer: React.FC<CompactPlayerProps> = ({
   const handlePointerMove = (e: React.PointerEvent) => {
     if (startXRef.current === null) return;
     const dx = e.clientX - startXRef.current;
-    if (Math.abs(dx) > 6) {
+    if (Math.abs(dx) > 5) {
       hasDraggedRef.current = true;
     }
-    // Only allow swiping left (towards the orb) if onTuck is provided
+    // Allow swiping left (towards the orb to tuck) if onTuck is provided
     if (onTuck) {
       if (dx < 0) {
-        setDragOffset(Math.max(-100, dx));
+        setDragOffset(Math.max(-110, dx));
       } else {
-        setDragOffset(Math.min(15, dx * 0.2));
+        setDragOffset(Math.min(18, dx * 0.25));
       }
     }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.PointerEvent) => {
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
     if (startXRef.current !== null && onTuck) {
-      if (dragOffset < -35) {
+      if (dragOffset < -25) {
         onTuck();
       }
     }

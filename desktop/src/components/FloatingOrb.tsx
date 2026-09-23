@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useCallback } from 'react';
-import { Mic, Settings, MessageSquare, Maximize2 } from 'lucide-react';
+import { Mic, Settings, MessageSquare, Maximize2, Music } from 'lucide-react';
 import { startDragWindow } from '../utils/windowManager';
 
 export type OrbStateType = 'idle' | 'listening' | 'thinking' | 'executing' | 'speaking' | 'error';
@@ -18,6 +18,9 @@ export interface FloatingOrbProps {
   isToastVisible?: boolean;
   onOpenWindowMode?: () => void;
   disableDrag?: boolean;
+  onToggleMusic?: () => void;
+  isMusicActive?: boolean;
+  isPlayerTucked?: boolean;
 }
 
 const STATE_COLORS: Record<OrbStateType, Record<string, { r: number; g: number; b: number; hex: string }> | { all: { r: number; g: number; b: number; hex: string } }> = {
@@ -56,6 +59,9 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
   isToastVisible = false,
   onOpenWindowMode,
   disableDrag = false,
+  onToggleMusic,
+  isMusicActive = false,
+  isPlayerTucked = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -310,6 +316,26 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
               title="Type a command"
             >
               <MessageSquare className="w-3 h-3" />
+            </button>
+          )}
+
+          {onToggleMusic && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleMusic();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className={`w-5 h-5 rounded-full flex items-center justify-center transition cursor-pointer ${
+                isMusicActive
+                  ? isPlayerTucked
+                    ? 'text-emerald-400 hover:text-white hover:bg-white/10'
+                    : 'text-black bg-emerald-400 hover:bg-emerald-300'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/10'
+              }`}
+              title={isPlayerTucked ? 'Reveal Music Player (or swipe right)' : 'Tuck Music Player into Orb (or swipe left)'}
+            >
+              <Music className="w-3 h-3" />
             </button>
           )}
 

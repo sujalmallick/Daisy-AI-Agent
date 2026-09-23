@@ -37,7 +37,7 @@ export function App() {
     if (saved === 'window' || saved === 'dashboard' || saved === 'floating') {
       return saved;
     }
-    return 'window';
+    return 'floating';
   });
   const [orbState, setOrbState] = useState<OrbStateType>('idle');
   const [theme, setTheme] = useState<ThemeType>(() => {
@@ -60,18 +60,40 @@ export function App() {
     return localStorage.getItem('daisy_ambient_listening') !== 'false';
   });
 
-  // Spotify Playback State
-  const [playback, setPlayback] = useState<PlaybackState>({
-    isPlaying: false,
-    trackTitle: '',
-    trackArtist: '',
-    artworkUrl: null,
-    progressMs: 0,
-    durationMs: 0,
-    deviceName: 'Spotify',
-    volume: 50,
-    shuffleState: false,
-    repeatState: 'off',
+  // Spotify Playback State — initialized with cached track so player doesn't disappear
+  const [playback, setPlayback] = useState<PlaybackState>(() => {
+    try {
+      const cached = localStorage.getItem('daisy_last_playback');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.trackTitle) {
+          return {
+            isPlaying: false,
+            trackTitle: parsed.trackTitle,
+            trackArtist: parsed.trackArtist || '',
+            artworkUrl: parsed.artworkUrl || null,
+            progressMs: parsed.progressMs || 0,
+            durationMs: parsed.durationMs || 0,
+            deviceName: parsed.deviceName || 'Spotify',
+            volume: parsed.volume ?? 50,
+            shuffleState: false,
+            repeatState: 'off',
+          };
+        }
+      }
+    } catch {}
+    return {
+      isPlaying: false,
+      trackTitle: '',
+      trackArtist: '',
+      artworkUrl: null,
+      progressMs: 0,
+      durationMs: 0,
+      deviceName: 'Spotify',
+      volume: 50,
+      shuffleState: false,
+      repeatState: 'off',
+    };
   });
   const [isPlaybackLoading, setIsPlaybackLoading] = useState<boolean>(false);
   const [activeCard, setActiveCard] = useState<ConversationCardData | null>(null);
@@ -259,7 +281,7 @@ export function App() {
         const data = await res.json();
         const result = data?.result;
         if (result && result.track) {
-          setPlayback({
+          const nextPlayback: PlaybackState = {
             isPlaying: !!result.is_playing,
             trackTitle: result.track,
             trackArtist: `${result.artist}${result.album ? ` • ${result.album}` : ''}`,
@@ -270,18 +292,17 @@ export function App() {
             volume: result.volume_percent ?? 50,
             shuffleState: !!result.shuffle_state,
             repeatState: result.repeat_state || 'off',
-          });
+          };
+          setPlayback(nextPlayback);
+          try {
+            localStorage.setItem('daisy_last_playback', JSON.stringify(nextPlayback));
+          } catch {}
         } else {
-          // No track active
+          // No track actively playing from API — preserve last known track metadata so the tracker stays visible and accessible!
           setPlayback((prev) => ({
             ...prev,
             isPlaying: false,
-            trackTitle: '',
-            trackArtist: '',
-            artworkUrl: null,
-            progressMs: 0,
-            durationMs: 0,
-            deviceName: result?.device_name || 'Idle',
+            deviceName: result?.device_name || prev.deviceName,
             volume: result?.volume_percent ?? prev.volume,
           }));
         }
@@ -434,8 +455,11 @@ export function App() {
       unduckPlayback();
     }
 
-    // If playback command, refresh immediately
+    // If playback command, refresh immediately and reveal music player
     fetchLivePlayback(true);
+    if (data.source === 'spotify' || (prompt && /(play|music|song|spotify|resume|track)/i.test(prompt))) {
+      setIsPlayerTucked(false);
+    }
   }, [showToast, speakAloud, fetchLivePlayback, unduckPlayback]);
 
   // Voice command flow
@@ -1067,8 +1091,23 @@ export function App() {
                   assistantName={assistantName}
                   isToastVisible={toastVisible}
                   disableDrag={true}
+                  onToggleMusic={() => setIsPlayerTucked((prev) => !prev)}
+                  isMusicActive={hasActiveTrack}
+                  isPlayerTucked={isPlayerTucked}
                 />
-                {hasActiveTrack && (
+                {hasActiveTrack && isPlayerTucked && (
+                  <div
+                    onClick={() => setIsPlayerTucked(false)}
+                    className="no-drag-surface flex items-center justify-center -ml-2 self-center z-20 cursor-pointer group/pill select-none touch-none animate-in fade-in zoom-in-95 duration-200"
+                    title="Click or swipe to reveal music player"
+                  >
+                    <div className="flex items-center gap-1.5 py-2 px-2.5 rounded-r-xl bg-[#0c0f14]/90 hover:bg-[#1a202c]/95 border border-l-0 border-white/15 shadow-xl hover:border-emerald-500/40 transition-all text-zinc-400 group-hover/pill:text-emerald-400">
+                      <Music className={`w-3.5 h-3.5 ${playback.isPlaying ? 'animate-pulse text-emerald-400' : 'text-zinc-400'}`} />
+                      <ChevronRight className="w-3.5 h-3.5 -ml-0.5 group-hover/pill:translate-x-0.5 transition-transform" />
+                    </div>
+                  </div>
+                )}
+                {hasActiveTrack && !isPlayerTucked && (
                   <div className="shrink-0 animate-in fade-in slide-in-from-left-3 duration-300">
                     {playerMode === 'expanded' ? (
                       <NowPlayingCard
@@ -1096,6 +1135,7 @@ export function App() {
                         onNext={handleNext}
                         onPrev={handlePrev}
                         onExpand={() => setPlayerMode('expanded')}
+                        onTuck={() => setIsPlayerTucked(true)}
                       />
                     )}
                   </div>
@@ -1294,6 +1334,9 @@ export function App() {
             assistantName={assistantName}
             isQuickInputOpen={showQuickInput}
             isToastVisible={toastVisible}
+            onToggleMusic={() => setIsPlayerTucked((prev) => !prev)}
+            isMusicActive={hasActiveTrack}
+            isPlayerTucked={isPlayerTucked}
           />
         </div>
 
@@ -1302,17 +1345,23 @@ export function App() {
           <div
             onPointerDown={(e) => {
               if (e.button !== 0) return;
+              try {
+                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              } catch {}
               untuckStartXRef.current = e.clientX;
             }}
             onPointerMove={(e) => {
               if (untuckStartXRef.current === null) return;
               const dx = e.clientX - untuckStartXRef.current;
               if (dx > 0) {
-                setUntuckDragOffset(Math.min(35, dx));
+                setUntuckDragOffset(Math.min(40, dx));
               }
             }}
-            onPointerUp={() => {
-              if (untuckStartXRef.current !== null && untuckDragOffset > 15) {
+            onPointerUp={(e) => {
+              try {
+                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+              } catch {}
+              if (untuckStartXRef.current !== null && untuckDragOffset > 10) {
                 setIsPlayerTucked(false);
               }
               untuckStartXRef.current = null;

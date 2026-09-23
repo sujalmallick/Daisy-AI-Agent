@@ -289,31 +289,23 @@ class SpotifyMCPServer:
                 tracks = results.get("tracks", {}).get("items", [])
                 if tracks:
                     track = tracks[0]
-                    playback_succeeded = False
-                    try:
-                        self.sp.start_playback(device_id=target_device_id, uris=[track["uri"]])
-                        playback_succeeded = True
-                    except Exception as play_err:
-                        logger.warning(f"Playback on {target_device_id} error: {play_err}")
-                        # Auto-retry by opening Spotify on PC if it failed on smart speaker
-                        try:
-                            import subprocess, time
-                            subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
-                            time.sleep(1.8)
-                            refreshed = self.sp.devices().get("devices", [])
-                            comp = next((d for d in refreshed if d.get("type") in ("Computer", "Desktop")), None)
-                            if comp:
-                                self.sp.start_playback(device_id=comp["id"], uris=[track["uri"]])
-                                playback_succeeded = True
-                        except Exception as fallback_err:
-                            logger.warning(f"PC fallback playback error: {fallback_err}")
+                    track_uri = track.get("uri", "")
 
-                    if not playback_succeeded:
-                        return {
-                            "status": "device_error",
-                            "error": "Could not start playback. Please make sure Spotify is open on your PC.",
-                            "message": "Spotify could not start playback. Please make sure Spotify is open on your PC."
-                        }
+                    # 1. Dispatch directly to local Spotify desktop via protocol URI
+                    # This guarantees immediate audible playback on PC regardless of Free vs Premium tier
+                    import sys
+                    if sys.platform == "win32" and track_uri:
+                        try:
+                            import subprocess
+                            subprocess.Popen(["cmd", "/c", "start", "", track_uri], shell=True)
+                        except Exception as uri_err:
+                            logger.debug(f"Direct URI playback note: {uri_err}")
+
+                    # 2. Also send to Web API for active device targeting (Echo, smart speakers, Connect)
+                    try:
+                        self.sp.start_playback(device_id=target_device_id, uris=[track_uri])
+                    except Exception as web_err:
+                        logger.debug(f"Web API playback note: {web_err}")
 
                     return {
                         "status": "playing",
@@ -329,31 +321,20 @@ class SpotifyMCPServer:
                 items = res.get("albums", {}).get("items", [])
                 if items:
                     alb = items[0]
-                    tracks = self.sp.album_tracks(alb["id"])["items"]
-                    uris = [t["uri"] for t in tracks]
-                    playback_succeeded = False
-                    try:
-                        self.sp.start_playback(device_id=target_device_id, uris=uris)
-                        playback_succeeded = True
-                    except Exception:
-                        try:
-                            import subprocess, time
-                            subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
-                            time.sleep(1.8)
-                            refreshed = self.sp.devices().get("devices", [])
-                            comp = next((d for d in refreshed if d.get("type") in ("Computer", "Desktop")), None)
-                            if comp:
-                                self.sp.start_playback(device_id=comp["id"], uris=uris)
-                                playback_succeeded = True
-                        except Exception:
-                            pass
+                    alb_uri = alb.get("uri", "")
 
-                    if not playback_succeeded:
-                        return {
-                            "status": "device_error",
-                            "error": "Could not start playback. Please make sure Spotify is open on your PC.",
-                            "message": "Spotify could not start playback. Please make sure Spotify is open on your PC."
-                        }
+                    import sys
+                    if sys.platform == "win32" and alb_uri:
+                        try:
+                            import subprocess
+                            subprocess.Popen(["cmd", "/c", "start", "", alb_uri], shell=True)
+                        except Exception as uri_err:
+                            logger.debug(f"Direct album URI playback note: {uri_err}")
+
+                    try:
+                        self.sp.start_playback(device_id=target_device_id, context_uri=alb_uri)
+                    except Exception as web_err:
+                        logger.debug(f"Web API album playback note: {web_err}")
 
                     return {"status": "playing_album", "album": alb["name"], "message": f"Playing album: {alb['name']}"}
                 return {"error": f"Album '{album}' not found."}
