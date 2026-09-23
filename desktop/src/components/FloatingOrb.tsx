@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { Mic, Settings, MessageSquare, Maximize2, Music } from 'lucide-react';
-import { startDragWindow } from '../utils/windowManager';
+import { startDragWindow, moveWindowBy } from '../utils/windowManager';
 
 export type OrbStateType = 'idle' | 'listening' | 'thinking' | 'executing' | 'speaking' | 'error';
 export type ThemeType = 'glassmorphism' | 'sleek' | 'cyberpunk' | 'aurora';
@@ -148,29 +148,44 @@ export const FloatingOrb: React.FC<FloatingOrbProps> = ({
     };
   }, []);
 
-  const dragStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; time: number; lastX: number; lastY: number } | null>(null);
   const isDraggingRef = useRef<boolean>(false);
 
   const handleOrbPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
-    dragStartRef.current = { x: e.screenX, y: e.screenY, time: Date.now() };
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+    dragStartRef.current = { x: e.screenX, y: e.screenY, time: Date.now(), lastX: e.screenX, lastY: e.screenY };
     isDraggingRef.current = false;
   };
 
   const handleOrbPointerMove = (e: React.PointerEvent) => {
-    if (!dragStartRef.current || isDraggingRef.current) return;
-    const dx = e.screenX - dragStartRef.current.x;
-    const dy = e.screenY - dragStartRef.current.y;
-    if (Math.hypot(dx, dy) > 5) {
+    if (!dragStartRef.current) return;
+    const totalDx = e.screenX - dragStartRef.current.x;
+    const totalDy = e.screenY - dragStartRef.current.y;
+    if (!isDraggingRef.current && Math.hypot(totalDx, totalDy) > 5) {
       isDraggingRef.current = true;
       if (!disableDrag) {
         startDragWindow();
+      }
+    }
+    if (isDraggingRef.current && !disableDrag) {
+      const stepDx = e.screenX - dragStartRef.current.lastX;
+      const stepDy = e.screenY - dragStartRef.current.lastY;
+      dragStartRef.current.lastX = e.screenX;
+      dragStartRef.current.lastY = e.screenY;
+      if (stepDx !== 0 || stepDy !== 0) {
+        moveWindowBy(stepDx, stepDy);
       }
     }
   };
 
   const handleOrbPointerUp = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
     if (dragStartRef.current && !isDraggingRef.current) {
       const elapsed = Date.now() - dragStartRef.current.time;
       // An intentional click is between 40ms and 800ms

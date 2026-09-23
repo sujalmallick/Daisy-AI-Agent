@@ -69,25 +69,39 @@ class SpotifyMCPServer:
 
     def _ensure_active_device(self) -> Optional[str]:
         """
-        Finds an already-active or Computer Spotify device.
-        Avoids returning inactive smart speakers (which return 404).
+        Finds the target Spotify device for playback.
+        Prioritizes the local Computer/Desktop client so audio plays on PC speakers
+        rather than external phones or smart speakers in other rooms.
         """
         if not self.sp:
             return None
         try:
             devices = self.sp.devices().get("devices", [])
 
-            # Priority 1: Any device that is CURRENTLY ACTIVE
-            active_dev = next((d for d in devices if d.get("is_active")), None)
-            if active_dev:
-                return active_dev["id"]
-
-            # Priority 2: Any local Computer / Desktop device (even if idle)
+            # Priority 1: Any local Computer / Desktop device (active or idle)
             computer_dev = next((d for d in devices if d.get("type") in ("Computer", "Desktop")), None)
             if computer_dev:
                 return computer_dev["id"]
 
-            return None
+            # Priority 2: If no PC Spotify is in device list, launch Spotify desktop on PC and wait for it
+            import sys, subprocess, time
+            if sys.platform == "win32":
+                try:
+                    subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], shell=True)
+                    time.sleep(1.8)
+                    devices = self.sp.devices().get("devices", [])
+                    computer_dev = next((d for d in devices if d.get("type") in ("Computer", "Desktop")), None)
+                    if computer_dev:
+                        return computer_dev["id"]
+                except Exception as launch_err:
+                    logger.debug(f"Auto-launch Spotify note: {launch_err}")
+
+            # Priority 3: Any currently active device (smart speaker, phone, etc.)
+            active_dev = next((d for d in devices if d.get("is_active")), None)
+            if active_dev:
+                return active_dev["id"]
+
+            return devices[0]["id"] if devices else None
         except Exception as e:
             logger.warning(f"Could not find active Spotify device: {e}")
             return None
@@ -291,21 +305,30 @@ class SpotifyMCPServer:
                     track = tracks[0]
                     track_uri = track.get("uri", "")
 
-                    # 1. Dispatch directly to local Spotify desktop via protocol URI
-                    # This guarantees immediate audible playback on PC regardless of Free vs Premium tier
+                    # 1. Dispatch directly to local Spotify desktop via protocol URI with :play suffix
+                    # This instructs the Spotify desktop client to load and immediately begin playback
                     import sys
                     if sys.platform == "win32" and track_uri:
                         try:
                             import subprocess
-                            subprocess.Popen(["cmd", "/c", "start", "", track_uri], shell=True)
+                            subprocess.Popen(["cmd", "/c", "start", "", f"{track_uri}:play"], shell=True)
                         except Exception as uri_err:
                             logger.debug(f"Direct URI playback note: {uri_err}")
 
-                    # 2. Also send to Web API for active device targeting (Echo, smart speakers, Connect)
+                    # 2. Also send to Web API for active device targeting (PC / Connect / Echo)
                     try:
+                        if target_device_id:
+                            try:
+                                self.sp.transfer_playback(device_id=target_device_id, force_play=True)
+                            except Exception:
+                                pass
                         self.sp.start_playback(device_id=target_device_id, uris=[track_uri])
                     except Exception as web_err:
                         logger.debug(f"Web API playback note: {web_err}")
+
+                    # 3. Windows hardware media key backup to ensure playback begins
+                    if sys.platform == "win32":
+                        self._dispatch_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
 
                     return {
                         "status": "playing",
@@ -327,14 +350,22 @@ class SpotifyMCPServer:
                     if sys.platform == "win32" and alb_uri:
                         try:
                             import subprocess
-                            subprocess.Popen(["cmd", "/c", "start", "", alb_uri], shell=True)
+                            subprocess.Popen(["cmd", "/c", "start", "", f"{alb_uri}:play"], shell=True)
                         except Exception as uri_err:
                             logger.debug(f"Direct album URI playback note: {uri_err}")
 
                     try:
+                        if target_device_id:
+                            try:
+                                self.sp.transfer_playback(device_id=target_device_id, force_play=True)
+                            except Exception:
+                                pass
                         self.sp.start_playback(device_id=target_device_id, context_uri=alb_uri)
                     except Exception as web_err:
                         logger.debug(f"Web API album playback note: {web_err}")
+
+                    if sys.platform == "win32":
+                        self._dispatch_media_key(0xB3)
 
                     return {"status": "playing_album", "album": alb["name"], "message": f"Playing album: {alb['name']}"}
                 return {"error": f"Album '{album}' not found."}

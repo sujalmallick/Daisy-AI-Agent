@@ -565,22 +565,18 @@ class DesktopApi:
             def _apply():
                 try:
                     hwnd = form.Handle.ToInt64()
+                    form.AllowTransparency = False
+                    form.TransparencyKey = Drawing.Color.Empty
+                    form.BackColor = Drawing.Color.Black
+                    for c in form.Controls:
+                        c.BackColor = Drawing.Color.Black
+                        set_webview_transparent(c)
+                    enable_dwm_transparency(hwnd)
+
                     if mode == 'floating':
                         form.TopMost = True
-                        form.AllowTransparency = True
-                        form.TransparencyKey = Drawing.Color.Magenta
-                        form.BackColor = Drawing.Color.Magenta
-                        for c in form.Controls:
-                            c.BackColor = Drawing.Color.Magenta
-                            set_webview_transparent(c)
-                        enable_dwm_transparency(hwnd)
                     else:
                         form.TopMost = False
-                        form.AllowTransparency = False
-                        form.TransparencyKey = Drawing.Color.Empty
-                        form.BackColor = Drawing.Color.FromArgb(9, 11, 17)
-                        for c in form.Controls:
-                            c.BackColor = Drawing.Color.FromArgb(9, 11, 17)
                 except Exception as e:
                     print(f"[DaisyApi] Error setting window mode: {e}")
 
@@ -660,11 +656,11 @@ def main():
                                 user32.SendMessageW(wintypes.HWND(hwnd), 0x0080, 1, h_icon)
                             except Exception as ico_err:
                                 print(f"[Daisy] Icon set note: {ico_err}")
-                        form.AllowTransparency = True
-                        form.TransparencyKey = Drawing.Color.Magenta
-                        form.BackColor = Drawing.Color.Magenta
+                        form.AllowTransparency = False
+                        form.TransparencyKey = Drawing.Color.Empty
+                        form.BackColor = Drawing.Color.Black
                         for c in form.Controls:
-                            c.BackColor = Drawing.Color.Magenta
+                            c.BackColor = Drawing.Color.Black
                             set_webview_transparent(c)
                         enable_dwm_transparency(hwnd)
 

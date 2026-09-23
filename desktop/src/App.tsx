@@ -37,7 +37,7 @@ export function App() {
     if (saved === 'window' || saved === 'dashboard' || saved === 'floating') {
       return saved;
     }
-    return 'floating';
+    return 'window';
   });
   const [orbState, setOrbState] = useState<OrbStateType>('idle');
   const [theme, setTheme] = useState<ThemeType>(() => {
@@ -248,6 +248,9 @@ export function App() {
     } else if (isSettingsOpen) {
       targetMode = 'settings';
       onTop = true;
+    } else if (activeCard) {
+      targetMode = 'expanded';
+      onTop = true;
     } else if (hasActiveTrack && playerMode === 'expanded') {
       targetMode = 'expanded';
       onTop = true;
@@ -265,7 +268,7 @@ export function App() {
       setWidgetOnTop(onTop);
       setNativeWindowMode(appMode === 'window' ? 'window' : 'floating');
     }
-  }, [appMode, isSettingsOpen, hasActiveTrack, playerMode, isPlayerTucked]);
+  }, [appMode, isSettingsOpen, hasActiveTrack, playerMode, isPlayerTucked, activeCard]);
 
   // Sync ambient ref
   useEffect(() => {
@@ -1300,6 +1303,12 @@ export function App() {
           appMode={appMode}
           onSetAppMode={(m) => setAppMode(m)}
         />
+
+        {/* On-Screen Visual Pointer & Guidance Overlay (HeyClicky Beacon) */}
+        <ScreenPointerOverlay
+          target={pointerTarget}
+          onClear={() => setPointerTarget(null)}
+        />
       </div>
     );
   }
@@ -1308,7 +1317,7 @@ export function App() {
   const isExpanded = hasActiveTrack && !isPlayerTucked && playerMode === 'expanded';
 
   return (
-    <div className="no-drag-surface relative w-full h-full select-none overflow-visible bg-transparent flex justify-start items-start pt-7 pl-2.5">
+    <div className="no-drag-surface relative w-full h-full select-none overflow-visible bg-transparent flex flex-col justify-start items-start pt-7 pl-2.5">
       {/* Toast Notification Glider (Centered directly above the Orb anchor) */}
       <div className="absolute top-1 left-[95px] -translate-x-1/2 z-40 pointer-events-none">
         <ToastGlider message={toastMsg} meta={toastMeta} visible={toastVisible} />

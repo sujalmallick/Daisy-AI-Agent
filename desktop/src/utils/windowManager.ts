@@ -7,9 +7,9 @@ export interface WidgetDimensions {
 
 export const WIDGET_DIMENSIONS: Record<WidgetViewMode, WidgetDimensions> = {
   window: { width: 960, height: 700 },
-  orb: { width: 190, height: 250 },
-  compact: { width: 520, height: 250 },
-  expanded: { width: 520, height: 620 },
+  orb: { width: 260, height: 260 },
+  compact: { width: 520, height: 260 },
+  expanded: { width: 540, height: 620 },
   settings: { width: 640, height: 520 },
   dashboard: { width: 960, height: 700 },
 };
