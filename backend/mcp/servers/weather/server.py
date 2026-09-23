@@ -72,13 +72,11 @@ class WeatherMCPServer:
         url = f"https://wttr.in/{encoded_loc}?format=j1"
 
         try:
-            import ssl
-            ssl_ctx = ssl._create_unverified_context()
             req = urllib.request.Request(
                 url,
                 headers={"User-Agent": "DaisyAI-Assistant/1.0 (Windows NT 10.0; Win64; x64)"}
             )
-            with urllib.request.urlopen(req, timeout=3.5, context=ssl_ctx) as resp:
+            with urllib.request.urlopen(req, timeout=3.5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
 
             curr = data.get("current_condition", [{}])[0]

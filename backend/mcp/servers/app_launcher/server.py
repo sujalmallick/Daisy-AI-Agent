@@ -1,4 +1,5 @@
 import os
+import re
 import glob
 import shutil
 import subprocess
@@ -126,7 +127,7 @@ class AppLauncherMCPServer:
             if norm in self.KNOWN_APPS:
                 cmd_target, display_name = self.KNOWN_APPS[norm]
                 try:
-                    subprocess.Popen(["cmd", "/c", "start", "", cmd_target], shell=True)
+                    os.startfile(cmd_target)
                     logger.info(f"Launched known app: {display_name} ({cmd_target})")
                     return {
                         "status": "app_launched",
@@ -165,10 +166,13 @@ class AppLauncherMCPServer:
                 except Exception as e:
                     logger.warning(f"Failed to launch from PATH: {e}")
 
-            # 4. Fallback: try Windows 'start' directly
+            # 4. Fallback: sanitize application name and launch via os.startfile (no shell=True)
+            clean_app = re.sub(r"[^\w\s\-\.\:]", "", raw_app).strip()
+            if not clean_app:
+                return {"error": "Invalid application name."}
             try:
-                subprocess.Popen(["cmd", "/c", "start", "", raw_app], shell=True)
-                logger.info(f"Launched via shell fallback: {raw_app}")
+                os.startfile(clean_app)
+                logger.info(f"Launched via os.startfile: {clean_app}")
                 return {
                     "status": "app_launched",
                     "app": raw_app.title(),
@@ -218,6 +222,10 @@ class AppLauncherMCPServer:
             target_exe = EXE_MAP.get(norm, f"{norm}.exe" if not norm.endswith(".exe") else norm)
             display = self.KNOWN_APPS.get(norm, (None, raw_app.title()))[1]
 
+            # Validate target_exe to ensure only clean process executable names are passed
+            if not re.match(r"^[a-zA-Z0-9_\-\.]+$", target_exe):
+                return {"error": "Invalid application name for termination."}
+
             try:
                 res = subprocess.run(
                     ["taskkill", "/F", "/IM", target_exe],
@@ -232,13 +240,15 @@ class AppLauncherMCPServer:
                         "message": f"Closed {display}."
                     }
                 else:
-                    # Fallback: try Stop-Process by clean name
-                    p_name = target_exe.replace(".exe", "")
-                    subprocess.run(
-                        ["powershell", "-NoProfile", "-Command", f"Stop-Process -Name '{p_name}' -Force -ErrorAction SilentlyContinue"],
-                        capture_output=True,
-                        text=True
-                    )
+                    # Fallback: safely stop process using environment variable
+                    p_name = re.sub(r"[^a-zA-Z0-9_\-]", "", target_exe.replace(".exe", ""))
+                    if p_name:
+                        subprocess.run(
+                            ["powershell", "-NoProfile", "-NonInteractive", "-Command", "Stop-Process -Name $env:TARGET_PROC -Force -ErrorAction SilentlyContinue"],
+                            capture_output=True,
+                            text=True,
+                            env={**os.environ, "TARGET_PROC": p_name}
+                        )
                     return {
                         "status": "app_closed",
                         "app": display,

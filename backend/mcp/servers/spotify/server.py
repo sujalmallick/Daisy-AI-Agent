@@ -68,7 +68,7 @@ class SpotifyMCPServer:
                 logger.debug(f"[Spotify] Media key dispatch note: {e}")
         return False
 
-    def _ensure_active_device(self) -> Optional[str]:
+    def _get_target_device(self) -> Optional[Dict[str, Any]]:
         """
         Finds the target Spotify device for playback.
         Prioritizes the local Computer/Desktop client so audio plays on PC speakers
@@ -78,21 +78,27 @@ class SpotifyMCPServer:
             return None
         try:
             devices = self.sp.devices().get("devices", [])
+            if not devices:
+                return None
 
             # Priority 1: Any local Computer / Desktop device (active or idle)
             computer_dev = next((d for d in devices if d.get("type") in ("Computer", "Desktop")), None)
             if computer_dev:
-                return computer_dev["id"]
+                return computer_dev
 
             # Priority 2: Any currently active device (smart speaker, phone, etc.)
             active_dev = next((d for d in devices if d.get("is_active")), None)
             if active_dev:
-                return active_dev["id"]
+                return active_dev
 
-            return devices[0]["id"] if devices else None
+            return devices[0]
         except Exception as e:
             logger.warning(f"Could not find active Spotify device: {e}")
             return None
+
+    def _ensure_active_device(self) -> Optional[str]:
+        dev = self._get_target_device()
+        return dev["id"] if dev else None
 
     def get_tools(self) -> List[Dict[str, Any]]:
         """Returns standard MCP tool definitions."""
@@ -279,12 +285,18 @@ class SpotifyMCPServer:
             }
         # Ensure active device is resolved for all playback controls
         target_device_id = None
+        target_device_name = None
+        target_device_type = None
         if tool_name in ("play", "play_album", "resume", "next_track", "previous_track", "pause", "set_volume", "set_shuffle", "set_repeat", "recommend_vibes"):
-            target_device_id = self._ensure_active_device()
+            dev_info = self._get_target_device()
+            if dev_info:
+                target_device_id = dev_info.get("id")
+                target_device_name = dev_info.get("name")
+                target_device_type = dev_info.get("type")
 
         try:
             if tool_name == "play":
-                q = args.get("query", "")
+                q = args.get("query") or args.get("track") or args.get("song") or args.get("name") or ""
                 if args.get("artist"):
                     q += f" artist:{args['artist']}"
                 results = self.sp.search(q=q, type="track", limit=1)
@@ -297,20 +309,31 @@ class SpotifyMCPServer:
                     artwork_url = images[0].get("url") if images else None
                     artist_name = track["artists"][0]["name"] if track.get("artists") else "Unknown"
                     album_name = album_obj.get("name", "")
+                    dev_name = target_device_name or "Spotify"
+                    is_pc = target_device_type in ("Computer", "Desktop")
 
-                    # Pure Spotify Connect Web API playback (background streaming without opening the desktop GUI app)
+                    # Try transferring playback to target device
+                    if target_device_id:
+                        try:
+                            self.sp.transfer_playback(device_id=target_device_id, force_play=True)
+                        except Exception:
+                            pass
+
+                    # Attempt Web API playback
                     try:
-                        if target_device_id:
-                            try:
-                                self.sp.transfer_playback(device_id=target_device_id, force_play=True)
-                            except Exception:
-                                pass
                         self.sp.start_playback(device_id=target_device_id, uris=[track_uri])
                     except Exception as web_err:
                         logger.debug(f"Web API playback note: {web_err}")
-                        import sys
-                        if sys.platform == "win32":
-                            self._dispatch_media_key(0xB3)  # Fallback to local media key only if Web API fails
+
+                    # If targeting PC on Windows, also dispatch URI protocol and media key to ensure local client wakes up
+                    import sys
+                    if sys.platform == "win32" and (is_pc or not target_device_id):
+                        try:
+                            import subprocess
+                            subprocess.Popen(["cmd", "/c", "start", "", f"{track_uri}:play"], shell=True)
+                        except Exception as uri_err:
+                            logger.debug(f"Direct URI playback note: {uri_err}")
+                        self._dispatch_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
 
                     # Cache track info so compact player & conversation card immediately show full metadata & artwork
                     self._last_known_track_info = {
@@ -320,6 +343,8 @@ class SpotifyMCPServer:
                         "artwork_url": artwork_url,
                         "duration_ms": track.get("duration_ms", 0),
                         "uri": track_uri,
+                        "device": dev_name,
+                        "is_pc": is_pc,
                     }
 
                     return {
@@ -330,12 +355,14 @@ class SpotifyMCPServer:
                         "artwork_url": artwork_url,
                         "duration_ms": track.get("duration_ms", 0),
                         "uri": track_uri,
-                        "message": f"Now playing: {track['name']} by {artist_name}"
+                        "device": dev_name,
+                        "is_pc": is_pc,
+                        "message": f"Now playing: {track['name']} by {artist_name} on {dev_name}"
                     }
                 return {"error": f"Couldn't find any track matching '{q}'."}
 
             elif tool_name == "play_album":
-                album = args.get("album", "")
+                album = args.get("album") or args.get("query") or args.get("name") or ""
                 res = self.sp.search(q=album, type="album", limit=1)
                 items = res.get("albums", {}).get("items", [])
                 if items:
@@ -344,19 +371,28 @@ class SpotifyMCPServer:
                     alb_images = alb.get("images") or []
                     alb_art = alb_images[0].get("url") if alb_images else None
                     alb_artists = ", ".join(a["name"] for a in alb.get("artists", [])) if alb.get("artists") else "Spotify"
+                    dev_name = target_device_name or "Spotify"
+                    is_pc = target_device_type in ("Computer", "Desktop")
+
+                    if target_device_id:
+                        try:
+                            self.sp.transfer_playback(device_id=target_device_id, force_play=True)
+                        except Exception:
+                            pass
 
                     try:
-                        if target_device_id:
-                            try:
-                                self.sp.transfer_playback(device_id=target_device_id, force_play=True)
-                            except Exception:
-                                pass
                         self.sp.start_playback(device_id=target_device_id, context_uri=alb_uri)
                     except Exception as web_err:
                         logger.debug(f"Web API album playback note: {web_err}")
-                        import sys
-                        if sys.platform == "win32":
-                            self._dispatch_media_key(0xB3)
+
+                    import sys
+                    if sys.platform == "win32" and (is_pc or not target_device_id):
+                        try:
+                            import subprocess
+                            subprocess.Popen(["cmd", "/c", "start", "", f"{alb_uri}:play"], shell=True)
+                        except Exception as uri_err:
+                            logger.debug(f"Direct album URI playback note: {uri_err}")
+                        self._dispatch_media_key(0xB3)
 
                     self._last_known_track_info = {
                         "track": alb["name"],
@@ -365,6 +401,8 @@ class SpotifyMCPServer:
                         "artwork_url": alb_art,
                         "duration_ms": 0,
                         "uri": alb_uri,
+                        "device": dev_name,
+                        "is_pc": is_pc,
                     }
 
                     return {
@@ -373,7 +411,9 @@ class SpotifyMCPServer:
                         "track": alb["name"],
                         "artist": alb_artists,
                         "artwork_url": alb_art,
-                        "message": f"Playing album: {alb['name']}"
+                        "device": dev_name,
+                        "is_pc": is_pc,
+                        "message": f"Playing album: {alb['name']} on {dev_name}"
                     }
                 return {"error": f"Album '{album}' not found."}
 

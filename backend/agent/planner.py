@@ -75,13 +75,17 @@ class DaisyAgenticPlanner:
                         elif res_data.get("status") == "playing" and res_data.get("track"):
                             track = res_data["track"]
                             artist = res_data.get("artist", "")
-                            spoken_reply = f"Sure, playing {track}." if not artist else f"Playing {track} by {artist}."
+                            dev = res_data.get("device")
+                            dev_suffix = f" on {dev}" if dev and not res_data.get("is_pc") else ""
+                            spoken_reply = f"Sure, playing {track}{dev_suffix}." if not artist else f"Playing {track} by {artist}{dev_suffix}."
                         elif res_data.get("track"):
                             track = res_data["track"]
                             artist = res_data.get("artist", "")
                             is_playing = res_data.get("is_playing", False)
+                            dev = res_data.get("device")
+                            dev_suffix = f" on {dev}" if dev and not res_data.get("is_pc") else ""
                             if is_playing:
-                                spoken_reply = f"Playing {track}." if not artist else f"Playing {track} by {artist}."
+                                spoken_reply = f"Playing {track}{dev_suffix}." if not artist else f"Playing {track} by {artist}{dev_suffix}."
                             else:
                                 spoken_reply = f"Paused on {track}." if not artist else f"Paused on {track} by {artist}."
                         elif res_data.get("status") == "awaiting_confirmation":
@@ -364,7 +368,7 @@ class DaisyAgenticPlanner:
                             name=call_name,
                             response=clean_obs
                         )
-                        contents.append(types.Content(role="user", parts=[resp_part]))
+                        contents.append(types.Content(role="tool", parts=[resp_part]))
                 else:
                     # Model produced final spoken answer
                     if hasattr(response, "text") and response.text:

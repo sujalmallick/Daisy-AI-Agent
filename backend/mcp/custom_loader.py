@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import shlex
@@ -123,17 +124,22 @@ class CustomToolManager:
         try:
             if tool_type == "command":
                 cmd_template = tool.get("command", "")
-                # Safe argument substitution
                 formatted_cmd = cmd_template
                 for k, v in args.items():
+                    val_str = str(v)
+                    # Block shell metacharacters in parameter values
+                    if re.search(r"[;&|`$<>\n\r]", val_str):
+                        return {"error": f"Invalid argument for '{k}': shell metacharacters are prohibited."}
                     placeholder = f"{{{k}}}"
                     if placeholder in formatted_cmd:
-                        formatted_cmd = formatted_cmd.replace(placeholder, str(v))
+                        formatted_cmd = formatted_cmd.replace(placeholder, val_str)
 
                 timeout = tool.get("timeout", 15)
+                # Split command safely without shell=True to prevent command chaining
+                cmd_args = shlex.split(formatted_cmd, posix=False)
                 res = subprocess.run(
-                    formatted_cmd,
-                    shell=True,
+                    cmd_args,
+                    shell=False,
                     capture_output=True,
                     text=True,
                     timeout=timeout
@@ -191,8 +197,8 @@ class CustomToolManager:
 
         except subprocess.TimeoutExpired:
             return {"error": f"Command timed out after {tool.get('timeout', 15)} seconds."}
-        except requests.RequestException as re:
-            return {"error": f"HTTP request failed: {str(re)}"}
+        except requests.RequestException as req_err:
+            return {"error": f"HTTP request failed: {str(req_err)}"}
         except Exception as e:
             return {"error": f"Execution error: {str(e)}"}
 

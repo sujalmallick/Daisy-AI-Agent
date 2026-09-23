@@ -21,6 +21,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -125,6 +126,8 @@ class TTSManager:
             allowed = {"provider", "voice", "windows_voice", "rate", "pitch"}
             for k, v in updates.items():
                 if k in allowed:
+                    if k == "windows_voice" and isinstance(v, str):
+                        v = re.sub(r"[^a-zA-Z0-9\s\-]", "", v).strip()
                     self._config[k] = v
             self._save_config()
         return self.get_config()
@@ -304,30 +307,32 @@ class TTSManager:
     def _synthesize_windows_tts(self, text: str) -> Optional[Tuple[bytes, str]]:
         """Synthesize using Windows SAPI, returns (wav_bytes, 'audio/wav')."""
         try:
-            voice = self.windows_voice
+            voice = re.sub(r"[^a-zA-Z0-9\s\-]", "", self.windows_voice).strip()
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 tmp_path = f.name
 
-            # PowerShell script: select female voice explicitly and save to WAV file
+            # PowerShell script: uses environment variables instead of string interpolation
             ps = (
                 "Add-Type -AssemblyName System.Speech; "
                 "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-                f"$pref = '{voice}'; "
+                "$pref = $env:DAISY_TTS_VOICE; "
                 "$v = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Name -eq $pref -and $_.Enabled } | Select-Object -First 1; "
                 "if (-not $v) { "
                 "  $v = $s.GetInstalledVoices() | Where-Object { ($_.VoiceInfo.Gender -eq 'Female' -or $_.VoiceInfo.Name -match 'Zira|Jenny|Aria|Female|Eva|Hazel') -and $_.Enabled } | Select-Object -First 1 "
                 "}; "
                 "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
-                f"$s.SetOutputToWaveFile('{tmp_path}'); "
+                "$s.SetOutputToWaveFile($env:DAISY_TTS_OUTPUT); "
                 "$s.Speak($input); "
                 "$s.SetOutputToDefaultAudioDevice()"
             )
+            env = {**os.environ, "DAISY_TTS_VOICE": voice, "DAISY_TTS_OUTPUT": tmp_path}
             proc = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
                 input=text,
                 text=True,
                 capture_output=True,
                 timeout=12,
+                env=env,
             )
             if os.path.exists(tmp_path):
                 with open(tmp_path, "rb") as wf:
@@ -447,11 +452,11 @@ class TTSManager:
     def _play_windows_tts_direct(self, text: str) -> None:
         """Play text via Windows SAPI directly."""
         try:
-            voice = self.windows_voice
+            voice = re.sub(r"[^a-zA-Z0-9\s\-]", "", self.windows_voice).strip()
             ps = (
                 "Add-Type -AssemblyName System.Speech; "
                 "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-                f"$pref = '{voice}'; "
+                "$pref = $env:DAISY_TTS_VOICE; "
                 "$v = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Name -eq $pref -and $_.Enabled } | Select-Object -First 1; "
                 "if (-not $v) { "
                 "  $v = $s.GetInstalledVoices() | Where-Object { ($_.VoiceInfo.Gender -eq 'Female' -or $_.VoiceInfo.Name -match 'Zira|Jenny|Aria|Female|Eva|Hazel') -and $_.Enabled } | Select-Object -First 1 "
@@ -459,11 +464,13 @@ class TTSManager:
                 "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
                 "$s.Speak($input)"
             )
+            env = {**os.environ, "DAISY_TTS_VOICE": voice}
             proc = subprocess.Popen(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=env,
             )
             with self._lock:
                 self._active_proc = proc
