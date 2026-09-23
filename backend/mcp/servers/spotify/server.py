@@ -504,7 +504,28 @@ class SpotifyMCPServer:
                 chosen = random.sample(genres, min(2, len(genres)))
                 recs = self.sp.recommendations(seed_genres=chosen, limit=20)
                 uris = [t["uri"] for t in recs["tracks"]]
-                self.sp.start_playback(device_id=target_device_id, uris=uris)
+
+                import sys
+                if sys.platform == "win32" and uris:
+                    try:
+                        import subprocess
+                        subprocess.Popen(["cmd", "/c", "start", "", f"{uris[0]}:play"], shell=True)
+                    except Exception:
+                        pass
+
+                try:
+                    if target_device_id:
+                        try:
+                            self.sp.transfer_playback(device_id=target_device_id, force_play=True)
+                        except Exception:
+                            pass
+                    self.sp.start_playback(device_id=target_device_id, uris=uris)
+                except Exception as web_err:
+                    logger.debug(f"Web API vibe playback note: {web_err}")
+
+                if sys.platform == "win32":
+                    self._dispatch_media_key(0xB3)
+
                 return {
                     "status": "vibe_started",
                     "seeds": chosen,
